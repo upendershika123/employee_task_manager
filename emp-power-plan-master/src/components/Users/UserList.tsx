@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { User, Team } from '../../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,7 +64,7 @@ const UserList: React.FC<UserListProps> = ({ users, teams, onViewProfile }) => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.length === 0 ? (
+              {!users || users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
                     No team members available
@@ -92,7 +91,7 @@ const UserList: React.FC<UserListProps> = ({ users, teams, onViewProfile }) => {
                         {user.role.replace('_', ' ')}
                       </Badge>
                     </TableCell>
-                    <TableCell>{getTeamName(user.teamId)}</TableCell>
+                    <TableCell>{getTeamName(user.team_id)}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -133,7 +132,7 @@ const UserList: React.FC<UserListProps> = ({ users, teams, onViewProfile }) => {
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Building className="h-4 w-4 text-muted-foreground" />
-                    <span>Team: {getTeamName(selectedUser.teamId)}</span>
+                    <span>Team: {getTeamName(selectedUser.team_id)}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />

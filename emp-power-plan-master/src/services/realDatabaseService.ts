@@ -29,16 +29,25 @@ class RealDatabaseService implements DatabaseService {
 
   // User operations
   async getUsers(): Promise<User[]> {
+    console.log('Fetching all users...');
     const { data, error } = await supabase
       .from('users')
-      .select('*');
+      .select('*')
+      .order('role', { ascending: false }); // Order by role to put admins and team leads first
     
     if (error) {
       console.error('Error fetching users:', error);
       throw error;
     }
     
-    return data.map(user => ({
+    if (!data) {
+      console.log('No users found');
+      return [];
+    }
+    
+    console.log('Fetched users:', data);
+    
+    const users = data.map(user => ({
       id: user.id,
       name: user.name,
       email: user.email,
@@ -46,6 +55,9 @@ class RealDatabaseService implements DatabaseService {
       team_id: user.team_id,
       avatar: user.avatar,
     }));
+    
+    console.log('Processed users:', users);
+    return users;
   }
 
   async getUserById(id: string): Promise<User | null> {
@@ -114,6 +126,35 @@ class RealDatabaseService implements DatabaseService {
       }
       if (!userData.name) {
         throw new Error('Name is required');
+      }
+
+      // Get current user's session to check permissions
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        throw new Error('Failed to get current user session');
+      }
+
+      if (session) {
+        // Get current user's role and team
+        const { data: currentUser, error: currentUserError } = await supabase
+          .from('users')
+          .select('role, team_id')
+          .eq('id', session.user.id)
+          .single();
+
+        if (currentUserError) {
+          throw new Error('Failed to get current user details');
+        }
+
+        // If current user is a team lead
+        if (currentUser.role === 'team_lead') {
+          // Team leads can only create team members
+          if (userData.role !== 'team_member') {
+            throw new Error('Team leads can only create team members');
+          }
+          // Force assign the team lead's team_id
+          userData.team_id = currentUser.team_id;
+        }
       }
 
       // First, check if user already exists in auth
@@ -215,11 +256,11 @@ class RealDatabaseService implements DatabaseService {
         userRecord = data;
       } else {
         console.log('Creating new user in database...');
-        // Create new user
+        // Create new user with UUID from auth
         const { data, error } = await supabase
           .from('users')
           .insert({
-            id: authUserId,
+            id: authUserId, // Use the UUID from Supabase Auth
             name: userData.name,
             email: userData.email.toLowerCase(),
             role: userData.role || 'team_member',
@@ -236,9 +277,6 @@ class RealDatabaseService implements DatabaseService {
 
         userRecord = data;
       }
-
-      // Don't send any emails here - let the user request verification when they try to log in
-      console.log('User created/updated successfully. Verification email will be sent when user attempts to log in.');
 
       // If this is a new user (not an update), send an invite email immediately
       if (!existingDbUser) {
@@ -270,6 +308,24 @@ class RealDatabaseService implements DatabaseService {
 
   async updateUser(id: string, updates: Partial<User>): Promise<User> {
     try {
+      // If user is being updated to team lead role, check if the team already has a lead
+      if (updates.role === 'team_lead' && updates.team_id) {
+        const { data: existingTeamLead, error: checkError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('team_id', updates.team_id)
+          .eq('role', 'team_lead');
+
+        if (checkError) {
+          console.error('Error checking existing team lead:', checkError);
+          throw checkError;
+        }
+
+        if (existingTeamLead && existingTeamLead.length > 0 && existingTeamLead[0].id !== id) {
+          throw new Error('This team already has a team lead');
+        }
+      }
+
       // First, update the user in the database
       const { data, error } = await supabase
         .from('users')
@@ -305,6 +361,19 @@ class RealDatabaseService implements DatabaseService {
         console.error('Error updating user metadata in auth:', authError);
         // Don't throw the error, just log it
         // The user was updated in the database, so we don't want to fail the whole operation
+      }
+
+      // If user is made team lead, update the team's lead_id
+      if (updates.role === 'team_lead' && updates.team_id) {
+        const { error: teamError } = await supabase
+          .from('teams')
+          .update({ lead_id: id })
+          .eq('id', updates.team_id);
+
+        if (teamError) {
+          console.error('Error updating team lead:', teamError);
+          // Log error but don't throw as the user update was successful
+        }
       }
       
       // Return the updated user data
@@ -366,30 +435,52 @@ class RealDatabaseService implements DatabaseService {
   }
 
   async createTeam(teamData: Partial<Team>): Promise<Team> {
-    if (!teamData.id) {
-      teamData.id = `team-${Date.now()}`;
-    }
-    
-    const { data, error } = await supabase
-      .from('teams')
-      .insert({
-        id: teamData.id,
-        name: teamData.name || '',
-        lead_id: teamData.leadId || '',
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error creating team:', error);
+    try {
+      if (!teamData.id) {
+        teamData.id = `team-${Date.now()}`;
+      }
+
+      // If a team lead is being assigned, check if they're already a lead for another team
+      if (teamData.leadId) {
+        const { data: existingTeamLead, error: checkError } = await supabase
+          .from('teams')
+          .select('*')
+          .eq('lead_id', teamData.leadId);
+
+        if (checkError) {
+          console.error('Error checking existing team lead:', checkError);
+          throw checkError;
+        }
+
+        if (existingTeamLead && existingTeamLead.length > 0) {
+          throw new Error('This user is already a team lead for another team');
+        }
+      }
+      
+      const { data, error } = await supabase
+        .from('teams')
+        .insert({
+          id: teamData.id,
+          name: teamData.name || '',
+          lead_id: teamData.leadId || null,
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Error creating team:', error);
+        throw error;
+      }
+      
+      return {
+        id: data.id,
+        name: data.name,
+        leadId: data.lead_id,
+      };
+    } catch (error) {
+      console.error('Error in createTeam:', error);
       throw error;
     }
-    
-    return {
-      id: data.id,
-      name: data.name,
-      leadId: data.lead_id,
-    };
   }
 
   async updateTeam(id: string, updates: Partial<Team>): Promise<Team> {
@@ -668,22 +759,82 @@ class RealDatabaseService implements DatabaseService {
   // Performance operations
   async getPerformanceMetrics(): Promise<Performance[]> {
     try {
-      const { data, error } = await supabase
-        .from('performance')
-        .select('*');
-      
-      if (error) {
-        console.error('Error fetching performance metrics:', error);
-        throw error;
+      // Get the current date
+      const now = new Date();
+      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      // First get all completed tasks
+      const { data: completedTasks, error: completedError } = await supabase
+        .from('completed_tasks')
+        .select(`
+          *,
+          assigned_to,
+          completed_at,
+          accepted_at,
+          due_date,
+          priority,
+          status
+        `);
+
+      if (completedError) {
+        console.error('Error fetching completed tasks:', completedError);
+        throw completedError;
       }
-      
-      return data.map(perf => ({
-        userId: perf.user_id,
-        completedTasks: perf.completed_tasks,
-        onTimeCompletion: perf.on_time_completion,
-        averageTaskDuration: perf.average_task_duration,
-        period: perf.period,
-      }));
+
+      // Get all users
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('*');
+
+      if (usersError) {
+        console.error('Error fetching users:', usersError);
+        throw usersError;
+      }
+
+      // Group completed tasks by user
+      const userPerformance = users.map(user => {
+        const userTasks = completedTasks.filter(task => task.assigned_to === user.id);
+        
+        if (userTasks.length === 0) {
+          return {
+            userId: user.id,
+            completedTasks: 0,
+            onTimeCompletion: 0,
+            averageTaskDuration: 0,
+            period: currentPeriod
+          };
+        }
+
+        // Calculate metrics
+        const totalTasks = userTasks.length;
+        const onTimeTasks = userTasks.filter(task => {
+          const completedDate = new Date(task.completed_at);
+          const dueDate = new Date(task.due_date);
+          return completedDate <= dueDate;
+        }).length;
+
+        // Calculate average duration (from assignment to completion)
+        let totalDuration = 0;
+        userTasks.forEach(task => {
+          const createdDate = new Date(task.created_at);
+          const completedDate = new Date(task.completed_at);
+          const duration = completedDate.getTime() - createdDate.getTime();
+          totalDuration += duration;
+        });
+
+        const averageDuration = totalTasks > 0 ? totalDuration / totalTasks : 0;
+        const onTimePercentage = totalTasks > 0 ? (onTimeTasks / totalTasks) * 100 : 0;
+
+        return {
+          userId: user.id,
+          completedTasks: totalTasks,
+          onTimeCompletion: onTimePercentage,
+          averageTaskDuration: averageDuration,
+          period: currentPeriod
+        };
+      });
+
+      return userPerformance;
     } catch (error) {
       console.error('Error in getPerformanceMetrics:', error);
       throw error;
@@ -869,37 +1020,57 @@ class RealDatabaseService implements DatabaseService {
         });
         
         if (createError) {
+          // If user already exists in auth, proceed with password reset
+          if (createError.message.includes('already been registered')) {
+            console.log('User already exists in auth, sending password reset email...');
+            const { error: resetError } = await supabaseAdmin.auth.admin.generateLink({
+              type: 'recovery',
+              email: email.toLowerCase(),
+              options: {
+                redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+              }
+            });
+
+            if (resetError) {
+              console.error('Error sending password reset email:', resetError);
+              throw new Error('Failed to send password reset email');
+            }
+            return;
+          }
           console.error('Error creating auth user:', createError);
           throw new Error('Failed to create auth user');
         }
         
-        console.log('Auth user created, sending invite email...');
-      } else {
-        console.log('User exists in both database and Supabase Auth');
-      }
+        // Send invite email for new users
+        const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+          email.toLowerCase(),
+          {
+            redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+          }
+        );
 
-      // Send verification email using admin client with redirect URL
-      console.log('Sending invite email with redirect URL:', `${window.location.origin}/auth/callback?type=recovery`);
-      
-      const { error: verificationError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-        email.toLowerCase(),
-        {
-          redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+        if (inviteError) {
+          console.error('Error sending invite email:', inviteError);
+          throw new Error('Failed to send invite email');
         }
-      );
-
-      if (verificationError) {
-        console.error('Error sending verification email:', verificationError);
-        // Log the full error details
-        console.error('Verification error details:', {
-          message: verificationError.message,
-          status: verificationError.status,
-          name: verificationError.name
+      } else {
+        // For existing users, send a password reset email
+        console.log('User exists in auth, sending password reset email...');
+        const { error: resetError } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'recovery',
+          email: email.toLowerCase(),
+          options: {
+            redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+          }
         });
-        throw new Error('Failed to send verification email');
+
+        if (resetError) {
+          console.error('Error sending password reset email:', resetError);
+          throw new Error('Failed to send password reset email');
+        }
       }
 
-      console.log('Verification email sent successfully to:', email);
+      console.log('Email sent successfully to:', email);
     } catch (error) {
       console.error('Error in sendVerificationEmail:', error);
       throw error;
@@ -1206,6 +1377,7 @@ class RealDatabaseService implements DatabaseService {
   }
 
   async getUsersByTeamId(teamId: string): Promise<User[]> {
+    console.log('Fetching users for team:', teamId);
     const { data, error } = await supabase
       .from('users')
       .select('*')
@@ -1215,6 +1387,13 @@ class RealDatabaseService implements DatabaseService {
       console.error('Error fetching users by team ID:', error);
       throw error;
     }
+    
+    if (!data) {
+      console.log('No users found for team:', teamId);
+      return [];
+    }
+    
+    console.log('Found users for team:', data);
     
     return data.map(user => ({
       id: user.id,
@@ -1294,53 +1473,38 @@ class RealDatabaseService implements DatabaseService {
         return acc;
       }, {} as Record<string, string[]>);
 
-      // Group tasks by team for easier processing
-      const tasksByTeam: Record<string, any[]> = {};
-      automaticTasks.forEach(task => {
-        if (task.team_id) {
-          if (!tasksByTeam[task.team_id]) {
-            tasksByTeam[task.team_id] = [];
-          }
-          tasksByTeam[task.team_id].push(task);
-        }
-      });
-
-      // Process each team's tasks
-      for (const teamId in tasksByTeam) {
-        // Skip if team has no available users
+      // Process tasks by team
+      for (const task of automaticTasks) {
+        const teamId = task.team_id;
+        
+        // Skip if no users available for this team
         if (!usersByTeam[teamId]?.length) continue;
 
-        // Sort tasks by priority and creation date
-        const teamTasks = tasksByTeam[teamId].sort((a, b) => {
-          // First sort by priority (high > medium > low)
-          const priorityOrder = { high: 0, medium: 1, low: 2 };
-          const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-          
-          if (priorityDiff !== 0) {
-            return priorityDiff;
+        // Get the first available user from the task's team
+        const userId = usersByTeam[teamId][0];
+
+        try {
+          // Get the user's auth ID from the users table
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', userId)
+            .single();
+
+          if (userError) {
+            console.error('Error fetching user data:', userError);
+            continue;
           }
-          
-          // If priorities are the same, sort by creation date (oldest first)
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        });
-
-        // Assign tasks to available users in the team
-        for (const task of teamTasks) {
-          // Skip if no more users available in this team
-          if (!usersByTeam[teamId]?.length) break;
-
-          // Get the first available user from the task's team
-          const userId = usersByTeam[teamId][0];
 
           // Call the stored procedure to assign the task
           const { error: assignError } = await supabase
             .rpc('assign_automatic_task', {
               p_task_id: task.task_id,
-              p_user_id: userId,
+              p_user_id: userData.id, // Use the user's actual ID from the database
               p_task_title: task.task_title,
-              p_task_description: task.task_description,
+              p_task_description: task.task_description || '',
               p_priority: task.priority,
-              p_team_id: task.team_id,
+              p_team_id: teamId,
               p_due_date: task.due_date
             });
 
@@ -1355,12 +1519,15 @@ class RealDatabaseService implements DatabaseService {
           // If no more users in this team, remove the team from the list
           if (usersByTeam[teamId].length === 0) {
             delete usersByTeam[teamId];
-            break; // Exit the loop for this team
           }
+        } catch (error) {
+          console.error('Error assigning task:', error);
+          continue;
         }
       }
     } catch (error) {
       console.error('Error in checkAndAssignAutomaticTasks:', error);
+      throw error;
     }
   }
 

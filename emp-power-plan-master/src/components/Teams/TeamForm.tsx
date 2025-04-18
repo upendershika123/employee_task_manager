@@ -26,7 +26,7 @@ import * as z from 'zod';
 // Define schema for form validation
 const teamFormSchema = z.object({
   name: z.string().min(2, { message: "Team name must be at least 2 characters." }),
-  leadId: z.string({ required_error: "Please select a team lead." }),
+  leadId: z.string().optional(),
 });
 
 interface TeamFormProps {
@@ -47,10 +47,12 @@ const TeamForm: React.FC<TeamFormProps> = ({ onSubmit, availableLeads }) => {
   const handleFormSubmit = async (values: z.infer<typeof teamFormSchema>) => {
     try {
       // Submit the data to the parent component
-      onSubmit({
+      const teamData: Partial<Team> = {
         name: values.name,
-        leadId: values.leadId,
-      });
+        ...(values.leadId ? { leadId: values.leadId } : {})
+      };
+      
+      onSubmit(teamData);
       
       // Reset form
       form.reset();
@@ -90,14 +92,14 @@ const TeamForm: React.FC<TeamFormProps> = ({ onSubmit, availableLeads }) => {
               name="leadId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Team Lead</FormLabel>
+                  <FormLabel>Team Lead (Optional)</FormLabel>
                   <FormControl>
                     <Select
                       onValueChange={field.onChange}
                       defaultValue={field.value}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a team lead" />
+                        <SelectValue placeholder="Select a team lead (optional)" />
                       </SelectTrigger>
                       <SelectContent>
                         {availableLeads.map((lead) => (
@@ -109,6 +111,9 @@ const TeamForm: React.FC<TeamFormProps> = ({ onSubmit, availableLeads }) => {
                     </Select>
                   </FormControl>
                   <FormMessage />
+                  <p className="text-sm text-muted-foreground mt-1">
+                    You can also assign a team lead later when creating a new user with team lead role.
+                  </p>
                 </FormItem>
               )}
             />

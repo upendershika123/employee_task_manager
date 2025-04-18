@@ -148,6 +148,34 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Serve static files from the appropriate directory based on environment
+const staticDir = process.env.NODE_ENV === 'production' 
+  ? path.join(__dirname, 'dist')
+  : path.join(__dirname, 'public');
+
+app.use(express.static(staticDir));
+
+// For any route not handled by API, serve index.html
+// Using a more compatible approach for catch-all routes
+app.use((req, res, next) => {
+  // Skip if the request is for an API endpoint
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  // Skip if the request is for a static file
+  if (req.path.includes('.')) {
+    return next();
+  }
+  
+  // Serve index.html for all other routes
+  const indexPath = process.env.NODE_ENV === 'production'
+    ? path.join(__dirname, 'dist', 'index.html')
+    : path.join(__dirname, 'public', 'index.html');
+  res.sendFile(indexPath);
+});
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
+  console.log(`Serving static files from: ${staticDir}`);
 }); 

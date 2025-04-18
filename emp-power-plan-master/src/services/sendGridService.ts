@@ -1,4 +1,5 @@
 import { Task, User } from '@/types';
+import { toast } from 'sonner';
 
 // Get the app URL from Vite environment variables
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
@@ -13,8 +14,13 @@ interface EmailOptions {
 
 class SendGridService {
   private async sendEmail(options: EmailOptions) {
+    console.log('🚀 Attempting to send email:', {
+      to: options.to,
+      subject: options.subject
+    });
+
     try {
-      const response = await fetch(`${API_URL}/api/send-email`, {
+      const response = await fetch(`${API_URL}/send-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -33,20 +39,27 @@ class SendGridService {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
         } catch (e) {
-          // If response is not JSON, get the status text
           errorMessage = `${errorMessage}: ${response.statusText}`;
         }
+        console.error('❌ Email sending failed:', errorMessage);
         throw new Error(errorMessage);
       }
 
+      console.log('✅ Email sent successfully to:', options.to);
       return { success: true };
     } catch (error) {
-      console.error('Email Error:', error);
-      throw error;
+      console.error('❌ Email Error:', error);
+      return { success: false, error };
     }
   }
 
   async sendTaskAssignmentEmail(user: User, task: Task, assignedBy: User): Promise<void> {
+    console.log('📧 Sending task assignment email:', {
+      to: user.email,
+      taskTitle: task.title,
+      assignedBy: assignedBy.name
+    });
+
     try {
       const emailData: EmailOptions = {
         to: user.email,
@@ -60,28 +73,46 @@ class SendGridService {
               <h3 style="margin-top: 0;">${task.title}</h3>
               <p><strong>Description:</strong> ${task.description}</p>
               <p><strong>Priority:</strong> ${task.priority}</p>
-              <p><strong>Due Date:</strong> ${new Date(task.dueDate).toLocaleDateString()}</p>
+              <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Not set'}</p>
               <p><strong>Status:</strong> ${task.status}</p>
             </div>
             <p>You can view and manage this task in your dashboard.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${APP_URL}/tasks/${task.id}" 
+                 style="background-color: #2563eb; color: white; padding: 12px 24px; 
+                        text-decoration: none; border-radius: 6px; display: inline-block;">
+                View Task
+              </a>
+            </div>
             <p>Best regards,<br>Your Task Management System</p>
           </div>
         `
       };
 
-      await this.sendEmail(emailData);
-      console.log('Task assignment email sent successfully');
+      const result = await this.sendEmail(emailData);
+      if (result.success) {
+        console.log('✅ Task assignment email sent successfully');
+        toast.success('Task assignment notification sent');
+      } else {
+        console.warn('⚠️ Failed to send task assignment email');
+        toast.error('Failed to send task assignment notification');
+      }
     } catch (error) {
-      console.error('Error sending task assignment email:', error);
-      throw error;
+      console.error('❌ Error sending task assignment email:', error);
     }
   }
 
   async sendTaskCompletionEmail(task: Task, completedByUser: User, teamLead: User): Promise<void> {
     if (!task || !completedByUser || !teamLead) {
-      console.error('Missing required data for email');
+      console.error('❌ Missing required data for completion email:', { task, completedByUser, teamLead });
       return;
     }
+
+    console.log('📧 Sending task completion email:', {
+      task: task.title,
+      completedBy: completedByUser.name,
+      to: teamLead.email
+    });
 
     const taskUrl = `${APP_URL}/tasks/${task.id}`;
     
@@ -122,10 +153,16 @@ class SendGridService {
     };
 
     try {
-      await this.sendEmail(emailData);
+      const result = await this.sendEmail(emailData);
+      if (result.success) {
+        console.log('✅ Task completion email sent successfully');
+        toast.success('Task completion notification sent');
+      } else {
+        console.warn('⚠️ Failed to send task completion email');
+        toast.error('Failed to send task completion notification');
+      }
     } catch (error) {
-      console.error('Error sending task completion email:', error);
-      // Don't throw, just log the error
+      console.error('❌ Error sending task completion email:', error);
     }
   }
 
@@ -135,6 +172,13 @@ class SendGridService {
     reviewer: User,
     assignedUser: User
   ): Promise<void> {
+    console.log('📧 Sending task review email:', {
+      task: task.title,
+      status: reviewStatus,
+      reviewer: reviewer.name,
+      to: assignedUser.email
+    });
+
     const statusColors = {
       accepted: '#22c55e',
       rejected: '#ef4444',
@@ -185,11 +229,16 @@ class SendGridService {
     };
 
     try {
-      await this.sendEmail(emailData);
+      const result = await this.sendEmail(emailData);
+      if (result.success) {
+        console.log('✅ Task review email sent successfully');
+        toast.success('Task review notification sent');
+      } else {
+        console.warn('⚠️ Failed to send task review email');
+        toast.error('Failed to send task review notification');
+      }
     } catch (error) {
-      console.error('Error sending task review email:', error);
-      // Don't throw the error, just log it and continue
-      // This prevents the email error from breaking the review flow
+      console.error('❌ Error sending task review email:', error);
     }
   }
 }

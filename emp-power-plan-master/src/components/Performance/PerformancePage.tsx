@@ -19,8 +19,9 @@ const PerformancePage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [performanceData, setPerformanceData] = useState<NormalizedPerformance[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
 
   // Function to normalize a value between 0 and 1
   const normalizeValue = (value: number, min: number, max: number) => {
@@ -84,12 +85,12 @@ const PerformancePage: React.FC = () => {
     // For admin view, calculate and return only the averages
     if (user?.role === 'admin') {
       const teamMembers = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_member';
       });
       
       const teamLeads = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_lead';
       });
       
@@ -130,7 +131,7 @@ const PerformancePage: React.FC = () => {
     if (user?.role === 'team_lead') {
       // Filter data to only include team members from the team lead's team
       const teamMembers = data.filter(perf => {
-        const teamUser = users.find(u => u.id === perf.userId);
+        const teamUser = allUsers.find(u => u.id === perf.userId);
         return teamUser && teamUser.role === 'team_member' && teamUser.teamId === user.teamId;
       });
       
@@ -183,12 +184,12 @@ const PerformancePage: React.FC = () => {
     // For admin view, calculate and return only the averages
     if (user?.role === 'admin') {
       const teamMembers = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_member';
       });
       
       const teamLeads = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_lead';
       });
       
@@ -225,7 +226,7 @@ const PerformancePage: React.FC = () => {
     if (user?.role === 'team_lead') {
       // Filter data to only include team members from the team lead's team
       const teamMembers = data.filter(perf => {
-        const teamUser = users.find(u => u.id === perf.userId);
+        const teamUser = allUsers.find(u => u.id === perf.userId);
         return teamUser && teamUser.role === 'team_member' && teamUser.teamId === user.teamId;
       });
       
@@ -272,12 +273,12 @@ const PerformancePage: React.FC = () => {
     // For admin view, calculate and return only the averages
     if (user?.role === 'admin') {
       const teamMembers = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_member';
       });
       
       const teamLeads = data.filter(perf => {
-        const user = users.find(u => u.id === perf.userId);
+        const user = allUsers.find(u => u.id === perf.userId);
         return user && user.role === 'team_lead';
       });
       
@@ -310,7 +311,7 @@ const PerformancePage: React.FC = () => {
     if (user?.role === 'team_lead') {
       // Filter data to only include team members from the team lead's team
       const teamMembers = data.filter(perf => {
-        const teamUser = users.find(u => u.id === perf.userId);
+        const teamUser = allUsers.find(u => u.id === perf.userId);
         return teamUser && teamUser.role === 'team_member' && teamUser.teamId === user.teamId;
       });
       
@@ -344,7 +345,7 @@ const PerformancePage: React.FC = () => {
     if (user?.role === 'team_lead') {
       // Filter data to only include team members from the team lead's team
       const teamMembers = performanceData.filter(perf => {
-        const teamUser = users.find(u => u.id === perf.userId);
+        const teamUser = allUsers.find(u => u.id === perf.userId);
         return teamUser && teamUser.role === 'team_member' && teamUser.teamId === user.teamId;
       });
       
@@ -429,8 +430,10 @@ const PerformancePage: React.FC = () => {
 
   // Function to get user name by ID
   const getUserNameById = (userId: string) => {
-    if (userId === 'average') return 'Average';
-    return `User ${userId}`;
+    if (userId === 'average') return 'Overall Average';
+    if (userId === 'team_average') return 'Team Average';
+    const userData = allUsers.find(u => u.id === userId);
+    return userData?.name || 'Unknown User';
   };
 
   // Function to handle user click for admin
@@ -456,36 +459,37 @@ const PerformancePage: React.FC = () => {
   };
 
   useEffect(() => {
-    const fetchPerformanceData = async () => {
+    const fetchData = async () => {
       try {
         setIsLoading(true);
-        if (!user) return;
+        const users = await databaseService.getUsers();
+        setAllUsers(users);
+        let data: NormalizedPerformance[] = [];
 
-        // Fetch all users first to have them available for role filtering
-        const allUsers = await databaseService.getUsers();
-        setUsers(allUsers);
-
-        let data: NormalizedPerformance[];
         if (user.role === 'team_member') {
+          // For team members, only show their own performance
           const userPerf = await databaseService.getPerformanceByUserId(user.id);
           if (userPerf) {
             const allPerf = await databaseService.getPerformanceMetrics();
             const score = calculatePerformanceScore(allPerf, userPerf);
             const { category, color } = getPerformanceCategory(score);
+            const userData = users.find(u => u.id === user.id);
             data = [{
               ...userPerf,
               normalizedScore: score,
               performanceCategory: category,
               performanceColor: color,
-              userName: user.name
+              userName: userData?.name || 'Unknown User'
             }];
-          } else {
-            data = [];
           }
         } else if (user.role === 'team_lead') {
+          // For team leads, show performance of their team members AND their own performance
           const allPerf = await databaseService.getPerformanceMetrics();
           const teamUsers = await databaseService.getUsersByTeamId(user.teamId!);
-          data = teamUsers.map(teamUser => {
+          
+          // Include team lead's performance
+          const teamLeadPerf = allPerf.find(p => p.userId === user.id);
+          const teamData = teamUsers.map(teamUser => {
             const userPerf = allPerf.find(p => p.userId === teamUser.id);
             if (userPerf) {
               const score = calculatePerformanceScore(allPerf, userPerf);
@@ -500,21 +504,56 @@ const PerformancePage: React.FC = () => {
             }
             return null;
           }).filter((item): item is NormalizedPerformance => item !== null);
+
+          // Add team lead's performance if available
+          if (teamLeadPerf) {
+            const score = calculatePerformanceScore(allPerf, teamLeadPerf);
+            const { category, color } = getPerformanceCategory(score);
+            teamData.push({
+              ...teamLeadPerf,
+              normalizedScore: score,
+              performanceCategory: category,
+              performanceColor: color,
+              userName: user.name
+            });
+          }
+
+          // Calculate team averages including team lead's performance
+          if (teamData.length > 0) {
+            const avgCompletedTasks = teamData.reduce((sum, p) => sum + (p.completedTasks || 0), 0) / teamData.length;
+            const avgOnTimeCompletion = teamData.reduce((sum, p) => sum + (p.onTimeCompletion || 0), 0) / teamData.length;
+            const avgTaskDuration = teamData.reduce((sum, p) => sum + (p.averageTaskDuration || 0), 0) / teamData.length;
+            const avgScore = teamData.reduce((sum, p) => sum + p.normalizedScore, 0) / teamData.length;
+            
+            const teamAvgData: NormalizedPerformance = {
+              userId: 'team_average',
+              completedTasks: avgCompletedTasks,
+              onTimeCompletion: avgOnTimeCompletion,
+              averageTaskDuration: avgTaskDuration,
+              period: 'all',
+              normalizedScore: avgScore,
+              performanceCategory: getPerformanceCategory(avgScore).category,
+              performanceColor: getPerformanceCategory(avgScore).color,
+              userName: 'Team Average'
+            };
+            
+            data = [teamAvgData, ...teamData];
+          }
         } else {
           // Admin view - calculate averages for all users
           const allPerf = await databaseService.getPerformanceMetrics();
           
-          // Calculate individual performance scores
+          // Calculate individual performance scores with proper user names
           const individualData = allPerf.map(perf => {
             const score = calculatePerformanceScore(allPerf, perf);
             const { category, color } = getPerformanceCategory(score);
-            const user = allUsers.find(u => u.id === perf.userId);
+            const userData = users.find(u => u.id === perf.userId);
             return {
               ...perf,
               normalizedScore: score,
               performanceCategory: category,
               performanceColor: color,
-              userName: user?.name
+              userName: userData?.name || 'Unknown User'
             };
           });
 
@@ -525,7 +564,6 @@ const PerformancePage: React.FC = () => {
             const avgTaskDuration = individualData.reduce((sum, p) => sum + (p.averageTaskDuration || 0), 0) / individualData.length;
             const avgScore = individualData.reduce((sum, p) => sum + p.normalizedScore, 0) / individualData.length;
             
-            // Create a summary entry with average values
             const avgData: NormalizedPerformance = {
               userId: 'average',
               completedTasks: avgCompletedTasks,
@@ -535,27 +573,24 @@ const PerformancePage: React.FC = () => {
               normalizedScore: avgScore,
               performanceCategory: getPerformanceCategory(avgScore).category,
               performanceColor: getPerformanceCategory(avgScore).color,
-              userName: 'Average'
+              userName: 'Overall Average'
             };
             
-            // Store both the average and individual data
             data = [avgData, ...individualData];
-          } else {
-            data = [];
           }
         }
 
         setPerformanceData(data);
       } catch (error) {
         console.error('Error fetching performance data:', error);
-        toast.error('Failed to fetch performance data');
+        toast.error('Failed to load performance data');
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchPerformanceData();
-  }, [user]);
+    fetchData();
+  }, [user, databaseService]);
 
   const handleBackToDashboard = () => {
     navigate('/');
@@ -573,7 +608,7 @@ const PerformancePage: React.FC = () => {
     
     // Filter data to only include team members from the team lead's team
     const teamMembers = performanceData.filter(perf => {
-      const teamUser = users.find(u => u.id === perf.userId);
+      const teamUser = allUsers.find(u => u.id === perf.userId);
       return teamUser && teamUser.role === 'team_member' && teamUser.teamId === user.teamId;
     });
     
@@ -655,7 +690,11 @@ const PerformancePage: React.FC = () => {
           Back to Dashboard
         </Button>
         <h1 className="text-3xl font-bold tracking-tight">
-          {user.role === 'team_member' ? 'My Performance Metrics' : 'Team Performance Metrics'}
+          {user.role === 'team_member' 
+            ? 'My Performance Metrics' 
+            : user.role === 'team_lead'
+              ? 'Team Performance Metrics'
+              : 'Performance Dashboard'}
         </h1>
       </div>
 
@@ -940,7 +979,7 @@ const PerformancePage: React.FC = () => {
                       <TableBody>
                         {performanceData.slice(1)
                           .filter(perf => {
-                            const user = users.find(u => u.id === perf.userId);
+                            const user = allUsers.find(u => u.id === perf.userId);
                             return user && user.role === 'team_lead';
                           })
                           .map((perf) => (
@@ -1011,7 +1050,7 @@ const PerformancePage: React.FC = () => {
                       <TableBody>
                         {performanceData.slice(1)
                           .filter(perf => {
-                            const user = users.find(u => u.id === perf.userId);
+                            const user = allUsers.find(u => u.id === perf.userId);
                             return user && user.role === 'team_member';
                           })
                           .map((perf) => (

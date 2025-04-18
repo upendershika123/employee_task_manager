@@ -92,3 +92,7 @@ export interface NormalizedPerformance extends Performance {
 }
 
 export * from './performance';
+export * from './task';
+export * from './user';
+export * from './team';
+export * from './notification';

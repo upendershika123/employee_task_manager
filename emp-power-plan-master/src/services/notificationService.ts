@@ -65,7 +65,7 @@ class NotificationService {
 
       // Create in-app notification
       await this.createNotification({
-        userId: task.assignedTo,
+        userId: task.assigned_to,
         title: `Task Review: ${task.title}`,
         message: messages[reviewStatus],
         type: `task_review_${reviewStatus}` as NotificationType,

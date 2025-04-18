@@ -131,7 +131,22 @@ AS $$
 DECLARE
   v_new_task_id UUID;
   v_admin_id TEXT;
+  v_auth_user_id UUID;
 BEGIN
+  -- Verify user exists
+  IF NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_user_id) THEN
+    RAISE EXCEPTION 'User not found with ID: %', p_user_id;
+  END IF;
+
+  -- Get the auth.users UUID for the user
+  SELECT id::UUID INTO v_auth_user_id
+  FROM auth.users
+  WHERE id::text = p_user_id;
+
+  IF v_auth_user_id IS NULL THEN
+    RAISE EXCEPTION 'User not found in auth.users with ID: %', p_user_id;
+  END IF;
+
   -- Get an admin user ID to use as assigned_by
   SELECT id INTO v_admin_id FROM public.users WHERE role = 'admin' LIMIT 1;
   
@@ -196,17 +211,23 @@ BEGIN
 
   -- Create notification for the user
   INSERT INTO public.notifications (
+    id,
     user_id,
     title,
     message,
     type,
-    task_id
+    task_id,
+    created_at,
+    read
   ) VALUES (
-    p_user_id::uuid,
+    gen_random_uuid(),
+    v_auth_user_id,
     'New Task Assigned',
     'You have been automatically assigned a new task: ' || p_task_title,
     'task_assignment',
-    v_new_task_id::text
+    v_new_task_id::text,
+    NOW(),
+    FALSE
   );
 END;
 $$; 

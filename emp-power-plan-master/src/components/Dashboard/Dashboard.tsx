@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Task, User, Team } from '@/types/index';
 import TaskList from '../Tasks/TaskList';
 import TaskForm from '../Tasks/TaskForm';
@@ -39,7 +39,7 @@ import UserDetailsModal from '@/components/User/UserDetailsModal';
 import { format } from 'date-fns';
 
 const Dashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const databaseService = useDatabaseService();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -53,6 +53,7 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState('tasks');
   const [selectedOption, setSelectedOption] = useState<string>('home');
   const [isUserDetailsOpen, setIsUserDetailsOpen] = useState(false);
+  const [showTeamSelectionDialog, setShowTeamSelectionDialog] = useState(false);
   
   useEffect(() => {
     const loadData = async () => {
@@ -62,6 +63,15 @@ const Dashboard: React.FC = () => {
           databaseService.getUsers(),
           databaseService.getTeams(),
         ]);
+
+        // Find the current user's full data from the users array
+        const currentUserData = allUsers.find(u => u.id === user.id);
+        
+        if (currentUserData && currentUserData.team_id !== user.team_id) {
+          // Update the local user state
+          user.team_id = currentUserData.team_id;
+        }
+        
         setTasks(allTasks);
         setUsers(allUsers);
         setTeams(allTeams);
@@ -72,7 +82,7 @@ const Dashboard: React.FC = () => {
     };
     
     loadData();
-  }, [databaseService]);
+  }, [databaseService, user.id]);
   
   // Add automatic task checking
   useEffect(() => {
@@ -99,28 +109,44 @@ const Dashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [databaseService]);
   
+  useEffect(() => {
+    // Show team selection dialog if team lead is not assigned to a team
+    if (user.role === 'team_lead' && !user.team_id && teams.length > 0) {
+      setShowTeamSelectionDialog(true);
+    }
+  }, [user.role, user.team_id, teams]);
+  
   if (!user) {
     return null;
   }
   
-  const userTasks = user.role === 'team_member' 
-    ? tasks.filter(task => task.assigned_to === user.id)
-    : user.role === 'team_lead' && user.team_id
-      ? tasks.filter(task => task.team_id === user.team_id)
-      : tasks;
+  const userTasks = user.role === 'admin'
+    ? tasks // Admin can see all tasks
+    : user.role === 'team_lead'
+      ? tasks.filter(task => 
+          task.assigned_by === user.id || // Tasks created by this team lead
+          task.assigned_to === user.id || // Tasks assigned to this team lead
+          (task.team_id === user.team_id) // Tasks within their team
+        )
+      : tasks.filter(task => task.assigned_to === user.id); // Team members only see tasks assigned to them
       
-  const teamMembers = user.role === 'admin' 
-    ? users.filter(u => u.role === 'team_member') 
-    : user.team_id 
-      ? users.filter(u => u.team_id === user.team_id && u.role === 'team_member')
+  // Filter users for display in the UserList component
+  const usersByRole = user.role === 'admin'
+    ? users // Admin sees all users
+    : user.role === 'team_lead'
+      ? users.filter(u => {
+          const isInTeam = u.team_id === user.team_id;
+          return isInTeam;
+        })
+      : []; // Team members don't see the user list
+
+  // Filter team members for task assignment
+  const teamMembers = user.role === 'admin'
+    ? users // Admin can assign to any user
+    : user.role === 'team_lead' && user.team_id
+      ? users.filter(u => u.team_id === user.team_id) // Team leads see their team members
       : [];
   
-  const usersByRole = user.role === 'admin'
-    ? users
-    : user.role === 'team_lead' && user.team_id
-      ? users.filter(u => u.team_id === user.team_id)
-      : [];
-      
   const completedTasks = userTasks.filter(task => task.status === 'completed').length;
   const pendingTasks = userTasks.filter(task => task.status === 'pending').length;
   const inProgressTasks = userTasks.filter(task => task.status === 'in_progress').length;
@@ -169,8 +195,11 @@ const Dashboard: React.FC = () => {
   
   const handleCreateTask = async (taskData: Partial<Task>) => {
     try {
-      // Log the incoming task data for debugging
-      console.log('Received task data in Dashboard:', taskData);
+      // Prevent team members from creating tasks
+      if (user.role === 'team_member') {
+        toast.error("Team members cannot create tasks. You can only work on tasks assigned to you.");
+        return;
+      }
       
       // First, verify that we have an assigned user
       if (!taskData.assigned_to) {
@@ -185,14 +214,23 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      // Log the assigned user details for debugging
-      console.log('Assigned user details:', assignedUser);
-
       // Ensure the assigned user has a team_id
-      if (!assignedUser.team_id) {
-        console.error('Selected user does not have a team_id:', assignedUser);
+      if (!assignedUser.team_id && user.role !== 'admin') {
         toast.error("Selected team member is not assigned to any team");
         return;
+      }
+
+      // Validate assignment based on user role
+      if (user.role === 'team_lead') {
+        // Team leads can only assign to team members in their team
+        if (assignedUser.team_id !== user.team_id) {
+          toast.error("You can only assign tasks to members of your team");
+          return;
+        }
+        if (assignedUser.role === 'team_lead') {
+          toast.error("Team leads can only assign tasks to team members");
+          return;
+        }
       }
 
       // Create the task with all required fields
@@ -200,17 +238,24 @@ const Dashboard: React.FC = () => {
       const taskToCreate: Partial<Task> = {
         ...taskData,
         assigned_by: user.id,
-        team_id: assignedUser.team_id, // Use the assigned user's team_id
+        team_id: assignedUser.team_id,
         created_at: format(now, 'yyyy-MM-dd'),
         updated_at: format(now, 'yyyy-MM-dd'),
         status: 'pending',
         review_status: 'pending'
       };
       
-      console.log('Creating task with data:', taskToCreate);
-      
       const newTask = await databaseService.createTask(taskToCreate);
       setTasks(prevTasks => [...prevTasks, newTask]);
+
+      // Send task assignment notification
+      try {
+        await notificationService.sendTaskAssignmentEmail(assignedUser, newTask, user);
+      } catch (notificationError) {
+        console.error('Error sending task assignment notification:', notificationError);
+        // Don't throw the error as the task creation was successful
+      }
+
       setShowNewTaskDialog(false);
       toast.success('Task created successfully');
     } catch (error) {
@@ -221,34 +266,44 @@ const Dashboard: React.FC = () => {
   
   const handleCreateUser = async (userData: Partial<User>) => {
     try {
-      // Log the incoming user data for debugging
-      console.log('Creating user with the following data:', userData);
-      
-      // ID is now entered by the user and validated as an integer in the form
-      // No need to generate an ID here
-      
       // For team leads, ensure team members are assigned to their team
-      if (user?.role === 'team_lead' && user?.team_id && !userData.team_id) {
+      if (user?.role === 'team_lead' && user?.team_id) {
         userData.team_id = user.team_id;
+      }
+      
+      // Ensure the user has the correct team_id based on selected team
+      if (userData.team_id) {
+        const selectedTeam = teams.find(team => team.id === userData.team_id);
+        if (!selectedTeam) {
+          toast.error("Selected team not found");
+          throw new Error("Selected team not found");
+        }
       }
       
       const newUser = await databaseService.createUser(userData);
       setUsers(prevUsers => [...prevUsers, newUser]);
       setShowNewUserDialog(false);
       toast.success(`${userData.role === 'team_lead' ? 'Team Lead' : 'Team Member'} added successfully`);
+      
+      return newUser; // Return the created user
     } catch (error) {
       console.error('Error creating user:', error);
       toast.error('Failed to add user');
+      throw error; // Re-throw the error to be handled by the form
     }
   };
   
   const getAvailableTeamMembers = () => {
     if (user.role === 'admin') {
-      // For admins, include both team members and team leads who have a team_id
-      return users.filter(u => (u.role === 'team_member' || u.role === 'team_lead') && u.team_id);
+      // For admins, show all team members and team leads
+      return users.filter(u => 
+        u.role === 'team_member' || u.role === 'team_lead'
+      );
     } else if (user.role === 'team_lead' && user.team_id) {
-      // For team leads, only include team members from their team
-      return users.filter(u => u.team_id === user.team_id && u.role === 'team_member');
+      // For team leads, only show members from their team
+      return users.filter(u => 
+        u.team_id === user.team_id && u.role === 'team_member'
+      );
     }
     return [];
   };
@@ -315,6 +370,29 @@ const Dashboard: React.FC = () => {
   
   const handleTaskClick = (taskId: string) => {
     navigate(`/tasks/${taskId}`);
+  };
+  
+  const handleTeamSelection = async (teamId: string) => {
+    try {
+      // Update the user's team_id
+      const updatedUser = await databaseService.updateUser(user.id, {
+        team_id: teamId
+      });
+      
+      // Update the local user state through auth context (if available)
+      if (typeof updateUser === 'function') {
+        updateUser(updatedUser);
+      }
+      
+      setShowTeamSelectionDialog(false);
+      toast.success('Successfully assigned to team');
+      
+      // Refresh the data
+      handleRefresh();
+    } catch (error) {
+      console.error('Error assigning team:', error);
+      toast.error('Failed to assign team');
+    }
   };
   
   return (
@@ -554,6 +632,29 @@ const Dashboard: React.FC = () => {
         teams={teams}
         users={users}
       />
+      
+      <Dialog open={showTeamSelectionDialog} onOpenChange={setShowTeamSelectionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Your Team</DialogTitle>
+            <DialogDescription>
+              As a team lead, you need to be assigned to a team. Please select your team from the list below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {teams.map((team) => (
+              <Button
+                key={team.id}
+                onClick={() => handleTeamSelection(team.id)}
+                variant="outline"
+                className="justify-start"
+              >
+                {team.name}
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

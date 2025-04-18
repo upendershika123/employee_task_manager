@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Bell } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Bell, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useNavigate } from 'react-router-dom';
 import { Notification } from '@/types';
@@ -13,6 +14,8 @@ import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/Auth/AuthContext';
 import { Badge } from '@/components/ui/badge';
+import { notificationService } from '@/services/notificationService';
+import { toast } from 'sonner';
 
 const NotificationBell: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -20,38 +23,43 @@ const NotificationBell: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  // Function to fetch notifications
+  const fetchNotifications = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      const formattedNotifications = data.map(notification => ({
+        id: notification.id,
+        userId: notification.user_id,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        read: notification.read,
+        createdAt: notification.created_at,
+        taskId: notification.task_id
+      }));
+
+      setNotifications(formattedNotifications);
+      setUnreadCount(formattedNotifications.filter(n => !n.read).length);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [user]);
+
+  // Set up real-time subscription and initial fetch
   useEffect(() => {
     if (!user) return;
 
-    const fetchNotifications = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-
-        if (error) throw error;
-
-        const formattedNotifications = data.map(notification => ({
-          id: notification.id,
-          userId: notification.user_id,
-          title: notification.title,
-          message: notification.message,
-          type: notification.type,
-          read: notification.read,
-          createdAt: notification.created_at,
-          taskId: notification.task_id
-        }));
-
-        setNotifications(formattedNotifications);
-        setUnreadCount(formattedNotifications.filter(n => !n.read).length);
-      } catch (error) {
-        console.error('Error fetching notifications:', error);
-      }
-    };
-
+    // Fetch notifications immediately when user is available
     fetchNotifications();
 
     // Subscribe to new notifications
@@ -81,11 +89,33 @@ const NotificationBell: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, fetchNotifications]);
 
   const handleNotificationClick = async (notification: Notification) => {
     // Navigate to notification details page
     navigate(`/notifications/${notification.id}`);
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user) return;
+    
+    try {
+      await notificationService.markAllNotificationsAsRead(user.id);
+      
+      // Update local state
+      setNotifications(prev => 
+        prev.map(notification => ({
+          ...notification,
+          read: true
+        }))
+      );
+      
+      setUnreadCount(0);
+      toast.success('All notifications marked as read');
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+      toast.error('Failed to mark all notifications as read');
+    }
   };
 
   const getNotificationStyle = (type: string) => {
@@ -95,6 +125,12 @@ const NotificationBell: React.FC = () => {
       case 'task_assigned':
         return 'bg-blue-50 border-l-4 border-blue-500';
       case 'task_updated':
+        return 'bg-yellow-50 border-l-4 border-yellow-500';
+      case 'task_review_accepted':
+        return 'bg-green-50 border-l-4 border-green-500';
+      case 'task_review_rejected':
+        return 'bg-red-50 border-l-4 border-red-500';
+      case 'task_review_needs_improvement':
         return 'bg-yellow-50 border-l-4 border-yellow-500';
       default:
         return '';
@@ -117,6 +153,21 @@ const NotificationBell: React.FC = () => {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
+        <div className="flex items-center justify-between p-2 border-b">
+          <h3 className="font-medium">Notifications</h3>
+          {unreadCount > 0 && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-8 text-xs flex items-center gap-1"
+              onClick={handleMarkAllAsRead}
+            >
+              <Check className="h-3 w-3" />
+              Mark all as read
+            </Button>
+          )}
+        </div>
+        
         {notifications.length === 0 ? (
           <div className="p-4 text-center text-sm text-muted-foreground">
             No notifications
@@ -143,6 +194,22 @@ const NotificationBell: React.FC = () => {
               </div>
             </DropdownMenuItem>
           ))
+        )}
+        
+        {notifications.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <div className="p-2 text-center">
+              <Button 
+                variant="link" 
+                size="sm" 
+                className="text-xs"
+                onClick={() => navigate('/notifications')}
+              >
+                View all notifications
+              </Button>
+            </div>
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

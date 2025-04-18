@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { TaskProgress } from '@/types';
-import { Task } from '@/types/task';
+import { Task, TaskProgress } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -16,6 +15,7 @@ import { sendGridService } from '@/services/sendGridService';
 import { toast } from 'sonner';
 import debounce from 'lodash/debounce';
 import { notificationService } from '@/services/notificationService';
+import { format } from 'date-fns';
 
 // Add new notification types
 type NotificationType = 
@@ -26,12 +26,19 @@ type NotificationType =
   | 'task_review_rejected'
   | 'task_review_needs_improvement';
 
-const TaskDetails: React.FC = () => {
+interface CompletedTask extends Task {
+  status: 'completed';
+  review_status: 'accepted';
+  accepted_at: string;
+  accepted_by: string;
+}
+
+const TaskDetails: React.FC<{}> = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
   const databaseService = useDatabaseService();
   const { user } = useAuth();
-  const [task, setTask] = useState<Task | null>(null);
+  const [task, setTask] = useState<Task | CompletedTask | null>(null);
   const [userText, setUserText] = useState('');
   const [progress, setProgress] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,6 +47,7 @@ const TaskDetails: React.FC = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [isReviewer, setIsReviewer] = useState(false);
+  const [reviewerName, setReviewerName] = useState<string>('');
 
   // Load task and existing progress
   useEffect(() => {
@@ -48,8 +56,53 @@ const TaskDetails: React.FC = () => {
       try {
         setIsLoading(true);
         
-        // First, load the task
-        const taskData = await databaseService.getTaskById(taskId);
+        // First, try to load from completed_tasks
+        const { data: completedTask, error: completedTaskError } = await supabase
+          .from('completed_tasks')
+          .select('*')
+          .eq('task_id', taskId)
+          .order('accepted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (completedTaskError) {
+          console.error('Error loading completed task:', completedTaskError);
+          toast.error('Failed to load task details');
+          return;
+        }
+
+        let taskData: Task | CompletedTask | null = null;
+
+        if (completedTask) {
+          // Task is in completed_tasks table
+          taskData = {
+            id: completedTask.task_id,
+            title: completedTask.title,
+            description: completedTask.description,
+            assigned_to: completedTask.assigned_to,
+            assigned_by: completedTask.assigned_by,
+            team_id: completedTask.team_id,
+            priority: completedTask.priority,
+            status: 'completed' as const,
+            review_status: 'accepted' as const,
+            due_date: completedTask.due_date,
+            created_at: completedTask.created_at,
+            updated_at: completedTask.updated_at,
+            completed_at: completedTask.completed_at,
+            accepted_at: completedTask.accepted_at,
+            accepted_by: completedTask.accepted_by
+          } as CompletedTask;
+        } else {
+          // Try to load from tasks table
+          taskData = await databaseService.getTaskById(taskId);
+        }
+        
+        // Check if task exists in either table
+        if (!taskData) {
+          toast.error('Task not found');
+          navigate('/');
+          return;
+        }
         
         // Check access permissions
         const isAssignedUser = taskData.assigned_to === user.id;
@@ -65,9 +118,71 @@ const TaskDetails: React.FC = () => {
           return;
         }
         
+        // If the user is assigned to this task and it's in pending status, update it to in_progress
+        if (isAssignedUser && taskData.status === 'pending' && !('accepted_at' in taskData)) {
+          try {
+            const { error: updateError } = await supabase
+              .from('tasks')
+              .update({ 
+                status: 'in_progress',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', taskData.id);
+
+            if (updateError) {
+              console.error('Error updating task status:', updateError);
+              toast.error('Failed to update task status');
+            } else {
+              // Update the local task data with proper type handling
+              const updatedTask: Task = {
+                ...taskData as Task,
+                status: 'in_progress',
+                review_status: 'pending',
+                updated_at: new Date().toISOString()
+              };
+              
+              // Create notification for task status update
+              await notificationService.createNotification({
+                userId: taskData.assigned_by,
+                title: 'Task Status Updated',
+                message: `Task "${taskData.title}" has been started by ${user.name}.`,
+                type: 'task_updated'
+              });
+
+              // Update the task data in state
+              setTask(updatedTask);
+            }
+          } catch (error) {
+            console.error('Error updating task status:', error);
+          }
+        } else {
         setTask(taskData);
+        }
+        
         setIsReadOnly(!isAssignedUser || isCompleted);
         setIsReviewer(isReviewer);
+
+        // If task is completed, load reviewer information
+        if (isCompleted && 'accepted_by' in taskData) {
+          try {
+            const { data: reviewer, error: reviewerError } = await supabase
+              .from('users')
+              .select('name')
+              .eq('id', taskData.accepted_by)
+              .maybeSingle();
+
+            if (reviewerError) {
+              console.error('Error loading reviewer:', reviewerError);
+              return;
+            }
+
+            if (reviewer) {
+              setReviewerName(reviewer.name);
+            }
+          } catch (error) {
+            console.error('Error loading reviewer information:', error);
+          }
+        }
 
         // Then try to load saved progress from task_input_history
         try {
@@ -77,7 +192,7 @@ const TaskDetails: React.FC = () => {
             .eq('task_id', taskId)
             .order('created_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
 
           if (error) {
             console.log('No previous progress found for this task');
@@ -149,7 +264,14 @@ const TaskDetails: React.FC = () => {
       if (error) throw error;
 
       // Update local task state
-      setTask(prev => prev ? { ...prev, status: newStatus } : null);
+      if (task) {
+        const updatedTask: Task = {
+          ...task as Task,
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        };
+        setTask(updatedTask);
+      }
     } catch (error) {
       console.error('Error updating task status:', error);
       toast.error('Failed to update task status');
@@ -176,13 +298,13 @@ const TaskDetails: React.FC = () => {
       const { error } = await supabase
         .from('task_input_history')
         .upsert({
-          task_id: taskId,
-          input_text: userText,
+            task_id: taskId,
+            input_text: userText,
           progress: Math.round(currentProgress),
           created_at: new Date().toISOString()
-        });
+          });
 
-      if (error) throw error;
+        if (error) throw error;
 
       setHasUnsavedChanges(false);
       toast.success('Progress saved successfully');
@@ -200,89 +322,57 @@ const TaskDetails: React.FC = () => {
   };
 
   const handleSubmitTask = async () => {
-    if (!task || !user || !taskId) {
-      toast.error('Missing task or user information');
-      return;
-    }
+    if (!taskId || !user || !task) return;
 
     try {
       setIsSubmitting(true);
+      
+      // Update task status to completed
+      const updatedTask: Task = {
+        ...task as Task,
+        status: 'completed',
+        review_status: 'pending',
+        completed_at: new Date().toISOString()
+      };
 
-      // 1. Save current progress
-      await handleSaveProgress();
-
-      // 2. Update task status
-      const { error: updateError } = await supabase
+      const { error } = await supabase
         .from('tasks')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          review_status: 'pending'
-        })
+        .update(updatedTask)
         .eq('id', taskId);
 
-      if (updateError) {
-        toast.error('Failed to update task status');
-        throw updateError;
-      }
+      if (error) throw error;
 
-      // 3. Get team lead information
-      const { data: teamLead, error: teamLeadError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('team_id', task.team_id)
-        .eq('role', 'team_lead')
-        .single();
-
-      if (teamLeadError) {
-        console.error('Error finding team lead:', teamLeadError);
-        toast.warning('Task completed but could not notify team lead');
-        return;
-      }
-
-      if (teamLead) {
-        // 4. Create notification
-        const { error: notificationError } = await supabase
-          .from('notifications')
-          .insert({
-            user_id: teamLead.id,
-            title: 'Task Completed',
-            message: `Task "${task.title}" has been completed by ${user.name} and is ready for review.`,
-            type: 'task_completed',
-            task_id: taskId,
-            created_at: new Date().toISOString()
-          });
-
-        if (notificationError) {
-          console.error('Error creating notification:', notificationError);
-          toast.warning('Task completed but notification failed');
-        }
-
-        // 5. Send email notification
-        try {
-          await sendGridService.sendTaskCompletionEmail(task, user, teamLead);
-        } catch (emailError) {
-          console.error('Error sending email:', emailError);
-          toast.warning('Task completed but email notification failed');
-        }
-      }
-
-      // 6. Update local state
-      setTask(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          status: 'completed',
-          completed_at: new Date(),
-          review_status: 'pending'
-        };
+      // Update local task state
+      setTask(updatedTask);
+      
+      // Create notification for task completion
+        await notificationService.createNotification({
+        userId: task.assigned_by,
+        title: 'Task Completed',
+          message: `Task "${task.title}" has been completed and is ready for review.`,
+        type: 'task_completed',
+        taskId: taskId
       });
-      setIsReadOnly(true);
 
-      toast.success('Task submitted successfully');
-      navigate('/dashboard');
+      // Send email notification
+      try {
+        const assignedByUser = await databaseService.getUserById(task.assigned_by);
+        const completedByUser = await databaseService.getUserById(task.assigned_to);
 
+        if (assignedByUser && completedByUser) {
+          await sendGridService.sendTaskCompletionEmail(
+            task,
+            completedByUser,
+            assignedByUser
+          );
+        }
+      } catch (emailError) {
+        console.error('Error sending task completion email:', emailError);
+        // Don't throw the error as the task update was successful
+      }
+      
+      toast.success('Task submitted for review');
+      navigate('/');
     } catch (error) {
       console.error('Error submitting task:', error);
       toast.error('Failed to submit task');
@@ -330,24 +420,11 @@ const TaskDetails: React.FC = () => {
 
   const handleReviewAction = async (action: 'accept' | 'reject' | 'needs_improvement') => {
     try {
-      if (!task) return;
-
-      // Get the work done text from task_input_history
-      const { data: taskInput, error: taskInputError } = await supabase
-        .from('task_input_history')
-        .select('input_text')
-        .eq('task_id', task.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (taskInputError) {
-        throw new Error('Failed to get task input history');
-      }
+      setIsSubmitting(true);
 
       if (action === 'accept') {
-        // Insert into completed_tasks
-        const { error: completedTaskError } = await supabase
+        // For accept, move to completed_tasks table
+        const { error: insertError } = await supabase
           .from('completed_tasks')
           .insert({
             task_id: task.id,
@@ -361,82 +438,89 @@ const TaskDetails: React.FC = () => {
             due_date: task.due_date,
             completed_at: new Date().toISOString(),
             accepted_at: new Date().toISOString(),
-            accepted_by: user?.id,
-            work_done: taskInput?.input_text || '',
+            accepted_by: user.id,
+            work_done: task.work_done || '',
             created_at: task.created_at,
             updated_at: new Date().toISOString()
           });
 
-        if (completedTaskError) {
-          throw new Error('Failed to move task to completed tasks');
+        if (insertError) {
+          console.error('Error inserting completed task:', insertError);
+          toast.error('Failed to accept task');
+          return;
         }
 
-        // Create notification
-        const { error: notificationError } = await supabase
-          .from('notifications')
-          .insert({
-            user_id: task.assigned_to,
-            title: 'Task Accepted',
-            message: `Your task "${task.title}" has been accepted.`,
-            type: 'task_review_accepted',
-            task_id: task.id,
-            created_at: new Date().toISOString(),
-            read: false
-          });
-
-        if (notificationError) {
-          throw new Error('Failed to create notification');
-        }
-
-        // Delete from tasks
+        // Delete from tasks table
         const { error: deleteError } = await supabase
           .from('tasks')
           .delete()
           .eq('id', task.id);
 
         if (deleteError) {
-          throw new Error('Failed to delete task');
+          console.error('Error deleting task:', deleteError);
+          toast.error('Failed to delete task');
+          return;
         }
+
+        // Send acceptance notification
+        try {
+          const assignedUser = await databaseService.getUserById(task.assigned_to);
+          if (assignedUser) {
+            await notificationService.sendTaskReviewNotification(
+              task,
+              'accepted',
+              user,
+              assignedUser
+            );
+          }
+        } catch (notificationError) {
+          console.error('Error sending acceptance notification:', notificationError);
+          // Don't throw the error as the task acceptance was successful
+        }
+
+        toast.success('Task accepted successfully');
+        navigate('/dashboard');
       } else {
-        // For reject or needs improvement, update the review_status
+        // For reject or needs improvement, update the task status
         const { error: updateError } = await supabase
           .from('tasks')
           .update({
+            status: 'in_progress',
             review_status: action === 'reject' ? 'rejected' : 'needs_improvement',
-            status: 'in_progress', // Allow editing by setting back to in_progress
             updated_at: new Date().toISOString()
           })
           .eq('id', task.id);
 
         if (updateError) {
-          throw new Error('Failed to update task status');
+          console.error('Error updating task:', updateError);
+          toast.error('Failed to update task status');
+          return;
         }
 
-        // Create notification
-        const { error: notificationError } = await supabase
-          .from('notifications')
-          .insert({
-            user_id: task.assigned_to,
-            title: action === 'reject' ? 'Task Rejected' : 'Task Needs Improvement',
-            message: `Your task "${task.title}" has been ${action === 'reject' ? 'rejected' : 'marked as needing improvement'}.`,
-            type: action === 'reject' ? 'task_review_rejected' : 'task_review_needs_improvement',
-            task_id: task.id,
-            created_at: new Date().toISOString(),
-            read: false
-          });
-
-        if (notificationError) {
-          throw new Error('Failed to create notification');
+        // Send rejection or needs improvement notification
+        try {
+          const assignedUser = await databaseService.getUserById(task.assigned_to);
+          if (assignedUser) {
+            await notificationService.sendTaskReviewNotification(
+              task,
+              action === 'reject' ? 'rejected' : 'needs_improvement',
+              user,
+              assignedUser
+            );
+          }
+        } catch (notificationError) {
+          console.error('Error sending review notification:', notificationError);
+          // Don't throw the error as the task update was successful
         }
+
+        toast.success(action === 'reject' ? 'Task rejected' : 'Task marked as needing improvement');
+        navigate('/dashboard');
       }
-
-      toast.success(action === 'accept' ? 'Task accepted successfully' : 
-                  action === 'reject' ? 'Task rejected' : 
-                  'Task marked as needing improvement');
-      navigate('/dashboard');
     } catch (error) {
       console.error('Error reviewing task:', error);
       toast.error('Failed to review task');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -469,47 +553,71 @@ const TaskDetails: React.FC = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <Button variant="ghost" onClick={handleBack} className="mb-4">
-        <ChevronLeft className="h-4 w-4 mr-2" />
-        Back to Dashboard
+      <div className="flex items-center justify-between mb-6">
+        <Button variant="ghost" onClick={handleBack} className="gap-2">
+          <ChevronLeft className="h-4 w-4" />
+          Back
       </Button>
+        {task?.status === 'completed' && (
+          <Badge className="bg-green-100 text-green-800">
+            <CheckCircle className="h-4 w-4 mr-1" />
+            Completed
+          </Badge>
+        )}
+      </div>
 
-      <Card className="mb-6">
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="ml-2">Loading task details...</span>
+        </div>
+      ) : task ? (
+        <div className="space-y-6">
+          <Card>
         <CardHeader>
-          <div className="flex items-center justify-between mb-2">
-            <CardTitle className="text-2xl font-bold">{task.title}</CardTitle>
-            <div className="flex gap-2">
+              <CardTitle className="flex items-center justify-between">
+                <span>{task.title}</span>
               <Badge className={getPriorityColor(task.priority)}>
                 {task.priority}
               </Badge>
+              </CardTitle>
+              <CardDescription>{task.description}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center gap-4">
               <Badge className={getStatusColor(task.status)}>
                 {task.status}
               </Badge>
+                  {task.status === 'completed' && reviewerName && (
+                    <span className="text-sm text-muted-foreground">
+                      Accepted by {reviewerName}
+                    </span>
+                  )}
             </div>
-          </div>
-          {task.due_date && (
+                {task.due_date && (
+                  <p className="text-sm text-muted-foreground">
+                    Due: {format(new Date(task.due_date), 'PPP')}
+                  </p>
+                )}
+                {task.completed_at && (
             <p className="text-sm text-muted-foreground">
-              Due date: {new Date(task.due_date).toLocaleDateString()}
+                    Completed: {format(new Date(task.completed_at), 'PPP')}
             </p>
           )}
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-lg font-semibold mb-2">Description</h3>
-              <CardDescription>
-                {task.description || 'No description provided'}
-              </CardDescription>
             </div>
+            </CardContent>
+          </Card>
 
-            <div>
+          <Card className="mb-6">
+            <CardHeader>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-semibold">Task Progress</h3>
+                <CardTitle className="text-2xl font-bold">Task Progress</CardTitle>
                 <span className="text-sm text-muted-foreground">{Math.round(progress)}%</span>
               </div>
               <Progress value={progress} className="mb-4" />
-            </div>
-
+            </CardHeader>
+            <CardContent>
             <div>
               <h3 className="text-lg font-semibold mb-2">Work Done</h3>
               <Textarea
@@ -540,10 +648,10 @@ const TaskDetails: React.FC = () => {
                     )}
                   </Button>
 
-                  {progress >= 100 && task?.status !== 'completed' && (
+                    {progress >= 100 && task?.status !== 'completed' && (
                     <Button
                       onClick={handleSubmitTask}
-                      disabled={isSubmitting || hasUnsavedChanges}
+                        disabled={isSubmitting || hasUnsavedChanges}
                       className="bg-green-600 hover:bg-green-700"
                     >
                       {isSubmitting ? (
@@ -565,7 +673,7 @@ const TaskDetails: React.FC = () => {
               {isReviewer && task.status === 'completed' && (
                 <div className="flex justify-end gap-4 mt-4">
                   <Button
-                    onClick={() => handleReviewAction('accept')}
+                      onClick={() => handleReviewAction('accept')}
                     disabled={isSubmitting}
                     className="bg-green-600 hover:bg-green-700"
                   >
@@ -581,7 +689,7 @@ const TaskDetails: React.FC = () => {
                     Needs Improvement
                   </Button>
                   <Button
-                    onClick={() => handleReviewAction('reject')}
+                      onClick={() => handleReviewAction('reject')}
                     disabled={isSubmitting}
                     className="bg-red-600 hover:bg-red-700"
                   >
@@ -590,10 +698,11 @@ const TaskDetails: React.FC = () => {
                   </Button>
                 </div>
               )}
-            </div>
           </div>
         </CardContent>
       </Card>
+        </div>
+      ) : null}
     </div>
   );
 };

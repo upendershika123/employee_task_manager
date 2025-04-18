@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Task, TaskPriority, TaskStatus, User } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { Task, TaskPriority, TaskStatus, User, UserRole } from '../../types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -35,8 +35,44 @@ const TaskForm: React.FC<TaskFormProps> = ({
     initialTask?.due_date ? new Date(initialTask.due_date) : undefined
   );
   
+  // Filter team members based on user role
+  const [filteredTeamMembers, setFilteredTeamMembers] = useState<User[]>([]);
+  
+  useEffect(() => {
+    // Filter team members based on user role and permissions
+    let availableMembers: User[] = [];
+    
+    if (currentUser.role === 'admin') {
+      // Admins can assign to team leads and team members
+      availableMembers = teamMembers.filter(member => 
+        member.role === 'team_lead' || member.role === 'team_member'
+      );
+    } else if (currentUser.role === 'team_lead' && currentUser.team_id) {
+      // Team leads can only assign to team members in their team
+      availableMembers = teamMembers.filter(member => 
+        member.role === 'team_member' && member.team_id === currentUser.team_id
+      );
+    } else if (currentUser.role === 'team_member') {
+      // Team members cannot assign tasks to anyone
+      availableMembers = [];
+    }
+    
+    setFilteredTeamMembers(availableMembers);
+    
+    // If the current assigned_to is not in the filtered list, reset it
+    if (assigned_to && !availableMembers.some(member => member.id === assigned_to)) {
+      setAssignedTo('');
+    }
+  }, [currentUser, teamMembers, assigned_to]);
+  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Prevent team members from creating tasks
+    if (currentUser.role === 'team_member') {
+      toast.error("Team members cannot create tasks. You can only work on tasks assigned to you.");
+      return;
+    }
     
     if (!title.trim()) {
       toast.error("Please enter a task title");
@@ -65,7 +101,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
       return;
     }
 
-    // For team leads, ensure the task is assigned to a member of their team
+    // Validate assignment based on user role
     if (currentUser.role === 'team_lead') {
       if (assignedUser.team_id !== currentUser.team_id) {
         toast.error("You can only assign tasks to members of your team");
@@ -76,6 +112,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
         return;
       }
     }
+    // Admins can assign to anyone (no additional validation needed)
     
     // Create task data with all required fields
     const now = new Date();
@@ -109,6 +146,9 @@ const TaskForm: React.FC<TaskFormProps> = ({
     }
   };
   
+  // Determine if the user can assign tasks
+  const canAssignTasks = currentUser.role === 'admin' || currentUser.role === 'team_lead';
+  
   return (
     <Card>
       <CardHeader>
@@ -124,6 +164,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Enter task title"
               required
+              disabled={!canAssignTasks}
             />
           </div>
           
@@ -136,20 +177,32 @@ const TaskForm: React.FC<TaskFormProps> = ({
               placeholder="Enter task description"
               required
               rows={3}
+              disabled={!canAssignTasks}
             />
           </div>
           
           <div className="space-y-2">
             <Label htmlFor="assigned_to">Assign To</Label>
-            <Select value={assigned_to} onValueChange={setAssignedTo} required>
+            <Select 
+              value={assigned_to} 
+              onValueChange={setAssignedTo} 
+              required
+              disabled={!canAssignTasks || filteredTeamMembers.length === 0}
+            >
               <SelectTrigger>
-                <SelectValue placeholder="Select team member" />
+                <SelectValue placeholder={
+                  !canAssignTasks 
+                    ? "You don't have permission to assign tasks" 
+                    : filteredTeamMembers.length === 0 
+                      ? "No eligible team members available" 
+                      : "Select team member"
+                } />
               </SelectTrigger>
               <SelectContent>
-                {teamMembers.length > 0 ? (
-                  teamMembers.map((member) => (
+                {filteredTeamMembers.length > 0 ? (
+                  filteredTeamMembers.map((member) => (
                     <SelectItem key={member.id} value={member.id}>
-                      {member.name}
+                      {member.name} {member.role === 'team_lead' ? '(Team Lead)' : ''}
                     </SelectItem>
                   ))
                 ) : (
@@ -159,12 +212,26 @@ const TaskForm: React.FC<TaskFormProps> = ({
                 )}
               </SelectContent>
             </Select>
+            {currentUser.role === 'team_lead' && (
+              <p className="text-sm text-muted-foreground">
+                As a team lead, you can only assign tasks to members of your team.
+              </p>
+            )}
+            {currentUser.role === 'team_member' && (
+              <p className="text-sm text-muted-foreground">
+                As a team member, you cannot create tasks. You can only work on tasks assigned to you.
+              </p>
+            )}
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
-              <Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}>
+              <Select 
+                value={priority} 
+                onValueChange={(value) => setPriority(value as TaskPriority)}
+                disabled={!canAssignTasks}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select priority" />
                 </SelectTrigger>
@@ -178,7 +245,11 @@ const TaskForm: React.FC<TaskFormProps> = ({
             
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
-              <Select value={status} onValueChange={(value) => setStatus(value as TaskStatus)}>
+              <Select 
+                value={status} 
+                onValueChange={(value) => setStatus(value as TaskStatus)}
+                disabled={!canAssignTasks}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
@@ -201,26 +272,31 @@ const TaskForm: React.FC<TaskFormProps> = ({
                     "w-full justify-start text-left font-normal",
                     !due_date && "text-muted-foreground"
                   )}
+                  disabled={!canAssignTasks}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {due_date ? format(due_date, "PPP") : "Select due date"}
+                  {due_date ? format(due_date, "PPP") : <span>Pick a date</span>}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0">
                 <Calendar
                   mode="single"
                   selected={due_date}
                   onSelect={setDueDate}
                   initialFocus
-                  className="p-3 pointer-events-auto"
+                  disabled={!canAssignTasks}
                 />
               </PopoverContent>
             </Popover>
           </div>
         </CardContent>
         
-        <CardFooter className="flex justify-end space-x-2">
-          <Button type="submit">
+        <CardFooter>
+          <Button 
+            type="submit" 
+            className="w-full"
+            disabled={!canAssignTasks}
+          >
             {initialTask ? 'Update Task' : 'Create Task'}
           </Button>
         </CardFooter>

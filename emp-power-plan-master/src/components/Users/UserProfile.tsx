@@ -151,9 +151,12 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId, userTasks }) => {
               <div>
                 <p className="text-sm font-medium">Last completed task:</p>
                 <p className="text-xs text-muted-foreground">
-                  {completedTasks.sort((a, b) => 
-                    new Date(b.completedAt || '').getTime() - new Date(a.completedAt || '').getTime()
-                  )[0].title}
+                  {completedTasks
+                    .sort((a, b) => {
+                      const dateA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+                      const dateB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+                      return dateB - dateA;
+                    })[0].title}
                 </p>
                 <p className="text-xs mt-2">
                   {completedTasks[0].completedAt 
@@ -181,7 +184,11 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId, userTasks }) => {
           {userTasks.length > 0 ? (
             <div className="space-y-4">
               {userTasks
-                .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+                .sort((a, b) => {
+                  const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                  const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                  return dateB - dateA;
+                })
                 .slice(0, 5)
                 .map(task => (
                   <div key={task.id} className="flex items-start gap-2">
@@ -192,7 +199,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ userId, userTasks }) => {
                     <div>
                       <p className="text-sm font-medium">{task.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        Due: {format(new Date(task.dueDate), 'MMM d, yyyy')}
+                        Due: {task.dueDate ? format(new Date(task.dueDate), 'MMM d, yyyy') : 'No due date'}
                       </p>
                     </div>
                   </div>

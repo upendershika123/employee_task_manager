@@ -52,8 +52,12 @@ const UserForm: React.FC<UserFormProps> = ({
     const fetchTeams = async () => {
       try {
         const fetchedTeams = await databaseService.getTeams();
-        setAvailableTeams(fetchedTeams);
-        console.log("Available teams:", fetchedTeams);
+        // If current user is a team lead, only show their team
+        const filteredTeams = currentUser.role === 'team_lead' && currentUser.team_id
+          ? fetchedTeams.filter(team => team.id === currentUser.team_id)
+          : fetchedTeams;
+        setAvailableTeams(filteredTeams);
+        console.log("Available teams:", filteredTeams);
       } catch (error) {
         console.error('Error fetching teams:', error);
         toast.error("Failed to load teams. Please try again.");
@@ -63,9 +67,13 @@ const UserForm: React.FC<UserFormProps> = ({
     if (teams.length === 0) {
       fetchTeams();
     } else {
-      setAvailableTeams(teams);
+      // Filter teams based on user role
+      const filteredTeams = currentUser.role === 'team_lead' && currentUser.team_id
+        ? teams.filter(team => team.id === currentUser.team_id)
+        : teams;
+      setAvailableTeams(filteredTeams);
     }
-  }, [databaseService, teams]);
+  }, [databaseService, teams, currentUser]);
   
   // Generate a unique ID for new users
   const defaultId = initialUser?.id || `user-${Date.now()}`;
@@ -74,12 +82,12 @@ const UserForm: React.FC<UserFormProps> = ({
   const form = useForm<z.infer<typeof userFormSchema>>({
     resolver: zodResolver(userFormSchema),
     defaultValues: {
-      id: defaultId,
+      id: initialUser?.id || `user-${Date.now()}`,
       name: initialUser?.name || '',
       email: initialUser?.email || '',
-      role: initialUser?.role || 'team_member',
-      team_id: initialUser?.team_id || (currentUser.role === 'team_lead' ? currentUser.team_id : null),
-      avatar: initialUser?.avatar || null
+      role: initialUser?.role || (currentUser.role === 'team_lead' ? 'team_member' : 'team_member'),
+      team_id: initialUser?.team_id || (currentUser.role === 'team_lead' ? currentUser.team_id : ''),
+      avatar: initialUser?.avatar || ''
     }
   });
   
@@ -88,29 +96,49 @@ const UserForm: React.FC<UserFormProps> = ({
   
   const handleFormSubmit = async (values: z.infer<typeof userFormSchema>) => {
     try {
-      // Construct the user object that matches the database schema
+      // If current user is a team lead, force assign their team_id
+      const team_id = currentUser.role === 'team_lead' && currentUser.team_id
+        ? currentUser.team_id
+        : values.team_id;
+
+      // Validate team selection for team leads
+      if (values.role === 'team_lead' && !team_id) {
+        toast.error("Please select a team for the team lead to manage");
+        return;
+      }
+
       const userData: Partial<User> = {
         id: values.id || `user-${Date.now()}`,
         name: values.name,
         email: values.email,
         role: values.role,
-        team_id: values.role === 'admin' ? null : values.team_id || null,
+        team_id: values.role === 'admin' ? null : team_id,
         avatar: values.avatar || null
       };
-      
-      // Validate team selection for non-admin users
-      if (values.role !== 'admin' && !values.team_id) {
-        toast.error("Please select a team for non-admin users");
-        return;
-      }
       
       // Log the data being sent to the database
       console.log('Creating/updating user with data:', userData);
       
-      // Submit the data to the parent component which will use databaseService
-      onSubmit(userData);
+      // Create/update the user first
+      const createdUser = await onSubmit(userData);
       
-      // Show success message
+      // If this is a team lead, update the team's lead_id
+      if (values.role === 'team_lead' && team_id) {
+        try {
+          await databaseService.updateTeam(team_id, {
+            leadId: createdUser.id
+          });
+          console.log('Updated team lead_id:', {
+            teamId: team_id,
+            leadId: createdUser.id
+          });
+        } catch (error) {
+          console.error('Error updating team lead:', error);
+          toast.error("User created but failed to assign as team lead. Please contact administrator.");
+          return;
+        }
+      }
+      
       toast.success(initialUser ? "User updated successfully" : "User added successfully");
     } catch (error) {
       console.error('Error submitting form:', error);
@@ -221,6 +249,7 @@ const UserForm: React.FC<UserFormProps> = ({
                       type="url"
                       placeholder="https://example.com/avatar.jpg"
                       {...field}
+                      value={field.value || ''}
                     />
                   </FormControl>
                   <FormDescription>
@@ -273,7 +302,8 @@ const UserForm: React.FC<UserFormProps> = ({
                     <FormLabel>Team</FormLabel>
                     <Select 
                       onValueChange={field.onChange} 
-                      defaultValue={field.value || undefined}
+                      value={field.value || ''}
+                      disabled={currentUser.role === 'team_lead' && selectedRole === 'team_member'} // Only disable when team lead is adding team members
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -295,7 +325,12 @@ const UserForm: React.FC<UserFormProps> = ({
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      The team this user will belong to
+                      {currentUser.role === 'team_lead' && selectedRole === 'team_member'
+                        ? "Team members will be automatically assigned to your team"
+                        : selectedRole === 'team_lead'
+                        ? "Select the team this team lead will manage"
+                        : "Select the team this member will belong to"
+                      }
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
