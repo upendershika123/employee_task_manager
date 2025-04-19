@@ -13,7 +13,9 @@ console.log('Environment Variables Debug:', {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
-const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+const appUrl = import.meta.env.MODE === 'production' 
+  ? import.meta.env.VITE_APP_URL 
+  : window.location.origin;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Environment Variables Status:', {
