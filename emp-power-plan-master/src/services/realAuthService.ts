@@ -22,7 +22,7 @@ class RealAuthService implements AuthService {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback`,
           data: {
             name,
             role: 'team_member', // Default role
@@ -71,7 +71,7 @@ class RealAuthService implements AuthService {
         const { error: verificationError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
           email.toLowerCase(),
           {
-            redirectTo: `${window.location.origin}/auth/callback`
+            redirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback`
           }
         );
 
@@ -178,7 +178,7 @@ class RealAuthService implements AuthService {
           type: 'signup',
           email: email.toLowerCase(),
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`
+            emailRedirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback`
           }
         });
 
@@ -284,7 +284,7 @@ class RealAuthService implements AuthService {
         const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
           email.toLowerCase(),
           {
-            redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+            redirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback?type=recovery`
           }
         );
         
@@ -309,7 +309,7 @@ class RealAuthService implements AuthService {
           type: 'signup',
           email: email.toLowerCase(),
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback?type=recovery`
+            emailRedirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback?type=recovery`
           }
         });
         
@@ -330,7 +330,7 @@ class RealAuthService implements AuthService {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(
         email.toLowerCase(),
         {
-          redirectTo: `${window.location.origin}/auth/callback?type=recovery`
+          redirectTo: `${import.meta.env.VITE_APP_URL}/auth/callback?type=recovery`
         }
       );
       
