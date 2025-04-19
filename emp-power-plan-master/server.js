@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs/promises';
 import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,16 +16,22 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Initialize Supabase
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseServiceKey = process.env.VITE_SUPABASE_SERVICE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing Supabase environment variables');
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 // Initialize SendGrid
 sgMail.setApiKey(process.env.VITE_SENDGRID_API_KEY);
-
-// Store task progress in memory (replace with database in production)
-const taskProgress = new Map();
-const referenceTexts = new Map();
 
 // Helper function to normalize text
 function normalizeText(text) {
@@ -85,12 +92,23 @@ app.post('/api/send-email', async (req, res) => {
 app.get('/api/tasks/:taskId/reference', async (req, res) => {
   try {
     const { taskId } = req.params;
-    const filePath = path.join(__dirname, 'reference_texts', `${taskId}.txt`);
     
-    const content = await fs.readFile(filePath, 'utf-8');
-    referenceTexts.set(taskId, content);
+    // Get reference text from tasks table
+    const { data: task, error } = await supabase
+      .from('tasks')
+      .select('description')
+      .eq('id', taskId)
+      .single();
     
-    res.json({ totalWords: content.trim().split(/\s+/).length });
+    if (error) throw error;
+    if (!task?.description) {
+      return res.status(404).json({ error: 'Reference text not found' });
+    }
+    
+    res.json({ 
+      content: task.description,
+      totalWords: task.description.trim().split(/\s+/).length 
+    });
   } catch (error) {
     console.error('Error reading reference text:', error);
     res.status(404).json({ error: 'Reference text not found' });
@@ -98,44 +116,86 @@ app.get('/api/tasks/:taskId/reference', async (req, res) => {
 });
 
 // Get task progress
-app.get('/api/tasks/:taskId/progress', (req, res) => {
-  const { taskId } = req.params;
-  const { userId } = req.query;
-  
-  const key = `${taskId}-${userId}`;
-  const progress = taskProgress.get(key) || {
-    currentText: '',
-    progress: 0,
-    lastSaved: new Date().toISOString(),
-    isCompleted: false
-  };
-  
-  res.json(progress);
+app.get('/api/tasks/:taskId/progress', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { userId } = req.query;
+    
+    // Get the latest progress entry
+    const { data, error } = await supabase
+      .from('task_input_history')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+      throw error;
+    }
+    
+    const progress = data || {
+      input_text: '',
+      progress: 0,
+      created_at: new Date().toISOString()
+    };
+    
+    res.json({
+      currentText: progress.input_text,
+      progress: progress.progress,
+      lastSaved: progress.created_at,
+      isCompleted: progress.progress === 100
+    });
+  } catch (error) {
+    console.error('Error fetching progress:', error);
+    res.status(500).json({ error: 'Failed to fetch progress' });
+  }
 });
 
 // Check task progress
-app.post('/api/tasks/check-progress', (req, res) => {
-  const { taskId, userId, text } = req.body;
-  
-  const referenceText = referenceTexts.get(taskId);
-  if (!referenceText) {
-    return res.status(404).json({ error: 'Reference text not found' });
+app.post('/api/tasks/check-progress', async (req, res) => {
+  try {
+    const { taskId, userId, text } = req.body;
+    
+    // Get reference text from tasks table
+    const { data: task, error: taskError } = await supabase
+      .from('tasks')
+      .select('description')
+      .eq('id', taskId)
+      .single();
+    
+    if (taskError) throw taskError;
+    if (!task?.description) {
+      return res.status(404).json({ error: 'Reference text not found' });
+    }
+    
+    // Calculate progress
+    const progress = calculateProgress(text, task.description);
+    
+    // Save progress to database
+    const { error: saveError } = await supabase
+      .from('task_input_history')
+      .upsert({
+        task_id: taskId,
+        input_text: text,
+        progress: Math.round(progress),
+        created_at: new Date().toISOString()
+      });
+    
+    if (saveError) throw saveError;
+    
+    const progressData = {
+      currentText: text,
+      progress,
+      lastSaved: new Date().toISOString(),
+      isCompleted: progress === 100
+    };
+    
+    res.json(progressData);
+  } catch (error) {
+    console.error('Error checking progress:', error);
+    res.status(500).json({ error: 'Failed to check progress' });
   }
-  
-  // Always recalculate progress
-  const progress = calculateProgress(text, referenceText);
-  const key = `${taskId}-${userId}`;
-  
-  const progressData = {
-    currentText: text,
-    progress,
-    lastSaved: new Date().toISOString(),
-    isCompleted: progress === 100
-  };
-  
-  // Update progress regardless of previous state
-  taskProgress.set(key, progressData);
-  res.json(progressData);
 });
 
 // Add health check endpoint
