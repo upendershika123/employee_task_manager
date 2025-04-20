@@ -4,6 +4,7 @@ import { supabase, supabaseAdmin } from '@/integrations/supabase/client';
 import { v4 as uuidv4 } from 'uuid';
 import { doc, setDoc, collection, getDocs, query, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/firebase/firebaseConfig';
+import { toast } from 'sonner';
 
 class RealDatabaseService implements DatabaseService {
   // Add connection test method
@@ -843,29 +844,78 @@ class RealDatabaseService implements DatabaseService {
 
   async getPerformanceByUserId(userId: string): Promise<Performance | null> {
     try {
-      const { data, error } = await supabase
-        .from('performance')
+      // Get the current period (YYYY-MM)
+      const now = new Date();
+      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      // Get completed tasks for the user in the current period
+      const { data: completedTasks, error: tasksError } = await supabase
+        .from('completed_tasks')
         .select('*')
-        .eq('user_id', userId)
-        .single();
-      
-      if (error) {
-        if (error.code === 'PGRST116') {
-          // Record not found
-          return null;
-        }
-        console.error('Error fetching performance by user ID:', error);
-        throw error;
+        .eq('assigned_to', userId)
+        .gte('completed_at', `${currentPeriod}-01`) // Start of current month
+        .lt('completed_at', `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, '0')}-01`); // Start of next month
+
+      if (tasksError) {
+        console.error('Error fetching completed tasks:', tasksError);
+        throw tasksError;
       }
-      
-      if (!data) return null;
-      
+
+      if (!completedTasks || completedTasks.length === 0) {
+        // Return default values if no completed tasks
+        return {
+          userId,
+          completedTasks: 0,
+          onTimeCompletion: 0,
+          averageTaskDuration: 0,
+          period: currentPeriod
+        };
+      }
+
+      // Calculate metrics
+      const totalTasks = completedTasks.length;
+      const onTimeTasks = completedTasks.filter(task => {
+        const completedDate = new Date(task.completed_at);
+        const dueDate = new Date(task.due_date);
+        return completedDate <= dueDate;
+      }).length;
+
+      // Calculate average duration (from assignment to completion)
+      let totalDuration = 0;
+      completedTasks.forEach(task => {
+        const createdDate = new Date(task.created_at);
+        const completedDate = new Date(task.completed_at);
+        const duration = completedDate.getTime() - createdDate.getTime();
+        totalDuration += duration;
+      });
+
+      const averageDuration = totalTasks > 0 ? totalDuration / totalTasks : 0;
+      const onTimePercentage = totalTasks > 0 ? (onTimeTasks / totalTasks) * 100 : 0;
+
+      // Update or insert performance record
+      const { data: performanceData, error: upsertError } = await supabase
+        .from('performance')
+        .upsert({
+          user_id: userId,
+          completed_tasks: totalTasks,
+          on_time_completion: onTimePercentage,
+          average_task_duration: averageDuration,
+          period: currentPeriod
+        })
+        .select()
+        .single();
+
+      if (upsertError) {
+        console.error('Error upserting performance data:', upsertError);
+        throw upsertError;
+      }
+
       return {
-        userId: data.user_id,
-        completedTasks: data.completed_tasks,
-        onTimeCompletion: data.on_time_completion,
-        averageTaskDuration: data.average_task_duration,
-        period: data.period,
+        userId: performanceData.user_id,
+        completedTasks: performanceData.completed_tasks,
+        onTimeCompletion: performanceData.on_time_completion,
+        averageTaskDuration: performanceData.average_task_duration,
+        period: performanceData.period
       };
     } catch (error) {
       console.error('Error in getPerformanceByUserId:', error);
@@ -873,104 +923,11 @@ class RealDatabaseService implements DatabaseService {
     }
   }
 
+  // Simplified updatePerformanceMetrics to use the new direct calculation
   async updatePerformanceMetrics(userId: string): Promise<void> {
     try {
-      console.log('Updating performance metrics for user:', userId);
-      
-      // Get all completed tasks for the user
-      const { data: tasks, error: tasksError } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('assigned_to', userId)
-        .eq('status', 'completed');
-      
-      if (tasksError) {
-        console.error('Error fetching completed tasks:', tasksError);
-        throw tasksError;
-      }
-      
-      if (!tasks || tasks.length === 0) {
-        console.log('No completed tasks found for user:', userId);
-        return;
-      }
-      
-      // Calculate performance metrics
-      const completedTasks = tasks.length;
-      
-      // Calculate on-time completion rate
-      const onTimeTasks = tasks.filter(task => {
-        const completedDate = new Date(task.completed_at);
-        const dueDate = new Date(task.due_date);
-        return completedDate <= dueDate;
-      }).length;
-      
-      const onTimeCompletion = completedTasks > 0 ? (onTimeTasks / completedTasks) * 100 : 0;
-      
-      // Calculate average task duration
-      let totalDuration = 0;
-      tasks.forEach(task => {
-        const createdDate = new Date(task.created_at);
-        const completedDate = new Date(task.completed_at);
-        const duration = completedDate.getTime() - createdDate.getTime();
-        totalDuration += duration;
-      });
-      
-      const averageTaskDuration = completedTasks > 0 ? totalDuration / completedTasks : 0;
-      
-      // Get current month and year for the period
-      const now = new Date();
-      const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      
-      // Check if performance record exists for this user and period
-      const { data: existingRecord, error: checkError } = await supabase
-        .from('performance')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('period', period)
-        .single();
-      
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error('Error checking existing performance record:', checkError);
-        throw checkError;
-      }
-      
-      if (existingRecord) {
-        // Update existing record
-        const { error: updateError } = await supabase
-          .from('performance')
-          .update({
-            completed_tasks: completedTasks,
-            on_time_completion: onTimeCompletion,
-            average_task_duration: averageTaskDuration,
-          })
-          .eq('user_id', userId)
-          .eq('period', period);
-        
-        if (updateError) {
-          console.error('Error updating performance record:', updateError);
-          throw updateError;
-        }
-        
-        console.log('Performance record updated for user:', userId);
-      } else {
-        // Create new record
-        const { error: insertError } = await supabase
-          .from('performance')
-          .insert({
-            user_id: userId,
-            completed_tasks: completedTasks,
-            on_time_completion: onTimeCompletion,
-            average_task_duration: averageTaskDuration,
-            period: period,
-          });
-        
-        if (insertError) {
-          console.error('Error creating performance record:', insertError);
-          throw insertError;
-        }
-        
-        console.log('New performance record created for user:', userId);
-      }
+      // This will now just call getPerformanceByUserId which handles the calculations
+      await this.getPerformanceByUserId(userId);
     } catch (error) {
       console.error('Error in updatePerformanceMetrics:', error);
       throw error;
@@ -1564,6 +1521,129 @@ class RealDatabaseService implements DatabaseService {
       }
     } catch (error) {
       console.error('Error sending task assignment email:', error);
+      throw error;
+    }
+  }
+
+  async deleteUser(userId: string, adminPassword: string): Promise<void> {
+    try {
+      // First, get the current user's email
+      const { data: { user }, error: userGetError } = await supabase.auth.getUser();
+      
+      if (userGetError || !user?.email) {
+        console.error('Failed to get current user:', userGetError);
+        toast.error('Failed to verify admin credentials');
+        throw new Error('Failed to get current user');
+      }
+
+      // Verify admin password
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: adminPassword,
+      });
+
+      if (signInError) {
+        console.error('Admin password verification failed:', signInError);
+        toast.error('Invalid admin password');
+        throw new Error('Invalid admin password');
+      }
+
+      // Get user details from the users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !userData) {
+        console.error('Error fetching user:', userError);
+        toast.error('User not found');
+        throw new Error('User not found');
+      }
+
+      // Get the user's auth ID from auth.users
+      const { data: authUsers, error: authListError } = await supabaseAdmin.auth.admin.listUsers();
+      
+      if (authListError) {
+        console.error('Error listing auth users:', authListError);
+        toast.error('Failed to verify user authentication');
+        throw authListError;
+      }
+
+      // Find the auth user that matches our database user's email
+      const authUser = authUsers.users.find(u => u.email === userData.email);
+      
+      if (!authUser) {
+        console.error('Auth user not found for email:', userData.email);
+        // Continue with database deletion even if auth user is not found
+      } else {
+        // Delete user from auth if found
+        const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+
+        if (authError) {
+          console.error('Error deleting auth user:', authError);
+          toast.error('Failed to delete user authentication');
+          throw authError;
+        }
+      }
+
+      // Get team members if the user is a team lead
+      let teamMembers: User[] = [];
+      if (userData.role === 'team_lead' && userData.team_id) {
+        const { data: members, error: membersError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('team_id', userData.team_id)
+          .eq('role', 'team_member');
+
+        if (membersError) {
+          console.error('Error fetching team members:', membersError);
+        } else {
+          teamMembers = members || [];
+        }
+      }
+
+      // Start database transaction to delete user data
+      const { data: transactionResult, error: transactionError } = await supabase.rpc('delete_user_transaction', {
+        p_user_id: userId,
+        p_user_role: userData.role,
+        p_team_id: userData.team_id
+      });
+
+      if (transactionError) {
+        console.error('Error in delete user transaction:', transactionError);
+        toast.error('Failed to delete user');
+        throw transactionError;
+      }
+
+      // If there's a new team lead, send notifications
+      if (transactionResult && transactionResult.length > 0) {
+        const { new_team_lead_id, new_team_lead_email } = transactionResult[0];
+        
+        if (new_team_lead_id) {
+          // Notify the new team lead
+          await supabase.from('notifications').insert({
+            user_id: new_team_lead_id,
+            title: 'Team Members Transferred',
+            message: `You are now managing ${teamMembers.length} team members from ${userData.name}'s team.`,
+            type: 'team_transfer'
+          });
+
+          // Notify each team member
+          for (const member of teamMembers) {
+            await supabase.from('notifications').insert({
+              user_id: member.id,
+              title: 'Team Lead Change',
+              message: `Your team lead has changed. Your new team lead is ${new_team_lead_email}.`,
+              type: 'team_transfer'
+            });
+          }
+        }
+      }
+
+      toast.success('User deleted successfully');
+    } catch (error) {
+      console.error('Error in deleteUser:', error);
       throw error;
     }
   }
