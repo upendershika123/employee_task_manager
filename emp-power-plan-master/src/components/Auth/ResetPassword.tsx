@@ -64,6 +64,9 @@ const ResetPassword: React.FC = () => {
         return;
       }
       
+      // Sign out the user after password reset
+      await supabase.auth.signOut();
+      
       toast.success('Password updated successfully! You can now log in with your new password.');
       navigate('/login');
     } catch (error) {
@@ -86,63 +89,65 @@ const ResetPassword: React.FC = () => {
   }
 
   return (
-    <Card className="w-full max-w-md mx-auto mt-8">
-      <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-2">
-          <div className="rounded-full bg-primary/10 p-3">
-            <Lock className="w-8 h-8 text-primary" />
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-2">
+            <div className="rounded-full bg-primary/10 p-3">
+              <Lock className="w-8 h-8 text-primary" />
+            </div>
           </div>
-        </div>
-        <CardTitle className="text-2xl font-bold">Reset Your Password</CardTitle>
-        <CardDescription>
-          Enter your new password below
-        </CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit}>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="password">New Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword">Confirm Password</Label>
-            <Input
-              id="confirmPassword"
-              type="password"
-              placeholder="••••••••"
-              required
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Updating...' : 'Update Password'}
-          </Button>
-          
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => navigate('/login')}
-            className="text-primary hover:text-primary/80"
-          >
-            Back to Login
-          </Button>
-        </CardFooter>
-      </form>
-    </Card>
+          <CardTitle className="text-2xl font-bold">Reset Your Password</CardTitle>
+          <CardDescription>
+            Enter your new password below
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="password">New Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                placeholder="••••••••"
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col space-y-4">
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Updating...' : 'Update Password'}
+            </Button>
+            
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => navigate('/login')}
+              className="text-primary hover:text-primary/80"
+            >
+              Back to Login
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
   );
 };
 
