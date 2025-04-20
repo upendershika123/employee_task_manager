@@ -44,5 +44,8 @@ export default defineConfig(async ({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
       },
     },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react-router-dom'],
+    },
   };
 });
