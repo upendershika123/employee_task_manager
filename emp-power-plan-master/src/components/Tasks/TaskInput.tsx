@@ -30,123 +30,92 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
   useEffect(() => {
     const loadSavedProgress = async () => {
       try {
-        const response = await fetch(`/api/tasks/${taskId}/progress?userId=${user?.id}`);
-        if (response.ok) {
-          const data: TaskProgress = await response.json();
-          setInputText(data.currentText || '');
-          setProgress(data.progress || 0);
-          setLastSaved(data.lastSaved ? new Date(data.lastSaved) : null);
+        console.log('Loading saved progress for task:', taskId);
+        const savedProgress = await databaseService.getTaskProgress(taskId);
+        console.log('Loaded saved progress:', savedProgress);
+        
+        if (savedProgress) {
+          setInputText(savedProgress.currentText || '');
+          setProgress(savedProgress.progressPercentage || 0);
+          setLastSaved(savedProgress.lastUpdated);
         }
       } catch (error) {
         console.error('Error loading saved progress:', error);
+        setError('Failed to load saved progress');
       }
     };
 
-    if (user?.id) {
+    if (user?.id && taskId) {
       loadSavedProgress();
     }
-  }, [taskId, user?.id]);
+  }, [taskId, user?.id, databaseService]);
 
-  // Check connection status periodically
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const connected = await databaseService.testConnection();
-        setIsConnected(connected);
-        if (!connected) {
-          setError('Lost connection to server. Progress may not be saved.');
-        } else {
-          setError(null);
-        }
-      } catch (err) {
-        setIsConnected(false);
-        setError('Error checking server connection.');
-      }
-    };
+  // Calculate progress based on text length and content
+  const calculateProgress = (text: string): number => {
+    if (!text.trim()) return 0;
+    
+    // Basic progress calculation based on text length
+    const minLength = 100; // Minimum expected length
+    const maxLength = 1000; // Maximum expected length for 100%
+    
+    // Calculate base progress from length
+    let lengthProgress = Math.min((text.length / maxLength) * 100, 100);
+    
+    // Additional factors
+    const hasParagraphs = text.includes('\n\n');
+    const hasProperSentences = text.match(/[.!?]\s/g)?.length > 3;
+    const hasGoodLength = text.length > minLength;
+    
+    // Bonus progress for good structure
+    if (hasParagraphs) lengthProgress += 5;
+    if (hasProperSentences) lengthProgress += 5;
+    if (hasGoodLength) lengthProgress += 5;
+    
+    // Cap at 100%
+    return Math.min(Math.round(lengthProgress), 100);
+  };
 
-    const interval = setInterval(checkConnection, 30000); // Check every 30 seconds
-    checkConnection(); // Initial check
-
-    return () => clearInterval(interval);
-  }, [databaseService]);
-
-  // Debounced function to check progress
-  const checkProgress = useCallback(
+  // Debounced function to save progress
+  const saveProgressDebounced = useCallback(
     debounce(async (text: string) => {
-      if (!user?.id) return;
+      if (!user?.id || !taskId) return;
 
       try {
         setIsSaving(true);
-        const response = await fetch('/api/tasks/check-progress', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            taskId,
-            userId: user.id,
-            text,
-          }),
-        });
+        const calculatedProgress = calculateProgress(text);
+        console.log('Saving progress:', { taskId, progress: calculatedProgress });
+        
+        await databaseService.saveTaskProgress(taskId, text, calculatedProgress);
+        setProgress(calculatedProgress);
+        setLastSaved(new Date());
+        setError(null);
 
-        if (response.ok) {
-          const data = await response.json();
-          setProgress(data.progress);
-          setLastSaved(new Date());
-
-          // If progress is 100%, mark task as completed
-          if (data.progress === 100) {
-            toast.success('Task completed successfully!');
-            // You can add additional completion logic here
-          }
+        // If progress is 100%, show completion message
+        if (calculatedProgress === 100) {
+          toast.success('Task completed successfully!');
         }
       } catch (error) {
-        console.error('Error checking progress:', error);
+        console.error('Error saving progress:', error);
+        setError('Failed to save progress');
         toast.error('Failed to save progress');
       } finally {
         setIsSaving(false);
       }
-    }, 500),
-    [taskId, user?.id]
+    }, 1000),
+    [taskId, user?.id, databaseService]
   );
-
-  const saveProgress = useCallback(async (text: string, progress: number) => {
-    try {
-      await databaseService.saveTaskProgress(taskId, text, progress);
-      setError(null);
-    } catch (err) {
-      console.error('Error saving progress:', err);
-      setError('Failed to save progress. Please try again.');
-    }
-  }, [taskId, databaseService]);
 
   // Handle input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setInputText(newText);
-    checkProgress(newText);
-  };
-
-  // Add this function
-  const testSupabaseConnection = async () => {
-    try {
-      const { data, error } = await databaseService.testConnection();
-      console.log('Supabase Connection Test:', {
-        success: !error,
-        url: window.location.origin,
-        timestamp: new Date().toISOString(),
-        error: error || 'None'
-      });
-      
-      if (!error) {
-        toast.success('Successfully connected to Supabase!');
-      } else {
-        toast.error('Failed to connect to Supabase');
-      }
-    } catch (err) {
-      console.error('Connection test failed:', err);
-      toast.error('Connection test failed');
-    }
+    
+    // Update progress immediately in UI
+    const newProgress = calculateProgress(newText);
+    setProgress(newProgress);
+    
+    // Save to database with debounce
+    saveProgressDebounced(newText);
   };
 
   return (
@@ -154,15 +123,6 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
       <CardHeader>
         <CardTitle>{taskTitle}</CardTitle>
         <CardDescription>{taskDescription}</CardDescription>
-        {/* Add this button */}
-        <Button 
-          onClick={testSupabaseConnection}
-          variant="outline"
-          size="sm"
-          className="mt-2"
-        >
-          Test Connection
-        </Button>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
