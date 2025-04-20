@@ -13,7 +13,7 @@ import TaskForm from '../Tasks/TaskForm';
 import UserList from '../Users/UserList';
 import UserForm from '../Users/UserForm';
 import TeamForm from '../Teams/TeamForm';
-import { CheckCircle, Clock, ClipboardList, Plus, Users, ChevronDown, RefreshCw } from 'lucide-react';
+import { CheckCircle, Clock, ClipboardList, Plus, Users, ChevronDown, RefreshCw, UserMinus } from 'lucide-react';
 import { getInitials, calculateCompletionPercentage } from '@/utils/helpers';
 import { toast } from 'sonner';
 import { useDatabaseService } from '@/services/DatabaseServiceContext';
@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import UserDetailsModal from '@/components/User/UserDetailsModal';
 import { format } from 'date-fns';
+import DeleteUserModal from '../Users/DeleteUserModal';
 
 const Dashboard: React.FC = () => {
   const { user, logout, updateUser } = useAuth();
@@ -54,6 +55,7 @@ const Dashboard: React.FC = () => {
   const [selectedOption, setSelectedOption] = useState<string>('home');
   const [isUserDetailsOpen, setIsUserDetailsOpen] = useState(false);
   const [showTeamSelectionDialog, setShowTeamSelectionDialog] = useState(false);
+  const [showDeleteUserDialog, setShowDeleteUserDialog] = useState(false);
   
   useEffect(() => {
     const loadData = async () => {
@@ -395,6 +397,26 @@ const Dashboard: React.FC = () => {
     }
   };
   
+  const handleDeleteUser = async (userId: string, adminPassword: string) => {
+    try {
+      await databaseService.deleteUser(userId, adminPassword);
+      
+      // Update local state
+      setUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
+      
+      // If the deleted user was a team lead, their team has been deleted
+      const deletedUser = users.find(u => u.id === userId);
+      if (deletedUser?.role === 'team_lead' && deletedUser.team_id) {
+        setTeams(prevTeams => prevTeams.filter(t => t.id !== deletedUser.team_id));
+      }
+      
+      toast.success('User deleted successfully');
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      // Error handling is done in the service
+    }
+  };
+  
   return (
     <>
       <div className="container mx-auto p-4">
@@ -563,28 +585,41 @@ const Dashboard: React.FC = () => {
               )}
               
               {(user.role === 'admin' || user.role === 'team_lead') && activeTab === 'team' && (
-                <Dialog open={showNewUserDialog} onOpenChange={setShowNewUserDialog}>
-                  <DialogTrigger asChild>
-                    <Button size="sm">
-                      <Plus className="h-4 w-4 mr-2" />
-                      {user.role === 'admin' ? 'Add User' : 'Add Team Member'}
+                <div className="flex gap-2">
+                  <Dialog open={showNewUserDialog} onOpenChange={setShowNewUserDialog}>
+                    <DialogTrigger asChild>
+                      <Button size="sm">
+                        <Plus className="h-4 w-4 mr-2" />
+                        {user.role === 'admin' ? 'Add User' : 'Add Team Member'}
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+                      <DialogHeader className="sticky top-0 bg-background z-10 pb-4 border-b">
+                        <DialogTitle>
+                          {user.role === 'admin' ? 'Add New User' : 'Add Team Member'}
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="pt-4">
+                        <UserForm 
+                          onSubmit={handleCreateUser}
+                          teams={teams}
+                          currentUser={user}
+                        />
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  {user.role === 'admin' && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => setShowDeleteUserDialog(true)}
+                    >
+                      <UserMinus className="h-4 w-4 mr-2" />
+                      Delete User
                     </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-                    <DialogHeader className="sticky top-0 bg-background z-10 pb-4 border-b">
-                      <DialogTitle>
-                        {user.role === 'admin' ? 'Add New User' : 'Add Team Member'}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <div className="pt-4">
-                      <UserForm 
-                        onSubmit={handleCreateUser}
-                        teams={teams}
-                        currentUser={user}
-                      />
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -655,6 +690,17 @@ const Dashboard: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {user.role === 'admin' && (
+        <DeleteUserModal
+          isOpen={showDeleteUserDialog}
+          onClose={() => setShowDeleteUserDialog(false)}
+          onConfirm={handleDeleteUser}
+          users={users}
+          teams={teams}
+          currentUser={user}
+        />
+      )}
     </>
   );
 };

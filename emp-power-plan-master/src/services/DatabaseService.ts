@@ -16,6 +16,7 @@ export interface DatabaseService {
   saveTaskProgress(taskId: string, inputText: string, progress: number): Promise<void>;
   testConnection(): Promise<boolean>;
   reconnect(): Promise<void>;
+  deleteUser(userId: string, adminPassword: string): Promise<void>;
 }
 
 export class DatabaseServiceImpl implements DatabaseService {
@@ -306,5 +307,9 @@ export class DatabaseServiceImpl implements DatabaseService {
       });
       return false;
     }
+  }
+
+  async deleteUser(userId: string, adminPassword: string): Promise<void> {
+    // Implementation of deleteUser method
   }
 } 

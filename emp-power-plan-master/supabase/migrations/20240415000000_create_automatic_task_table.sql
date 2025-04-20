@@ -230,4 +230,111 @@ BEGIN
     FALSE
   );
 END;
+$$;
+
+-- Create performance table if it doesn't exist
+CREATE TABLE IF NOT EXISTS performance (
+  user_id TEXT REFERENCES users(id),
+  completed_tasks INTEGER DEFAULT 0,
+  on_time_completion FLOAT DEFAULT 0,
+  average_task_duration FLOAT DEFAULT 0,
+  period TEXT NOT NULL,
+  is_archived BOOLEAN DEFAULT FALSE,
+  archived_user_name TEXT,
+  archived_user_email TEXT,
+  PRIMARY KEY (user_id, period)
+);
+
+-- Add indexes for performance queries
+CREATE INDEX IF NOT EXISTS idx_performance_user_id ON performance(user_id);
+CREATE INDEX IF NOT EXISTS idx_performance_period ON performance(period);
+
+-- Add RLS policies for performance table
+ALTER TABLE performance ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own performance"
+  ON performance FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Team leads can view their team's performance"
+  ON performance FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.id = auth.uid()
+      AND u.role = 'team_lead'
+      AND u.team_id = (
+        SELECT team_id FROM users
+        WHERE id = performance.user_id
+      )
+    )
+  );
+
+CREATE POLICY "Admins can view all performance"
+  ON performance FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM users
+      WHERE id = auth.uid()
+      AND role = 'admin'
+    )
+  );
+
+CREATE POLICY "System can update performance"
+  ON performance FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- Create function to calculate and update performance metrics
+CREATE OR REPLACE FUNCTION calculate_performance_metrics(p_user_id TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_completed_tasks INTEGER;
+  v_on_time_tasks INTEGER;
+  v_total_duration FLOAT;
+  v_period TEXT;
+BEGIN
+  -- Get current period (YYYY-MM)
+  v_period := to_char(CURRENT_DATE, 'YYYY-MM');
+  
+  -- Calculate metrics from completed tasks
+  SELECT 
+    COUNT(*),
+    COUNT(*) FILTER (WHERE completed_at <= due_date),
+    COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))), 0)
+  INTO 
+    v_completed_tasks,
+    v_on_time_tasks,
+    v_total_duration
+  FROM completed_tasks
+  WHERE assigned_to = p_user_id
+  AND to_char(completed_at, 'YYYY-MM') = v_period;
+
+  -- Insert or update performance record
+  INSERT INTO performance (
+    user_id,
+    completed_tasks,
+    on_time_completion,
+    average_task_duration,
+    period
+  ) VALUES (
+    p_user_id,
+    v_completed_tasks,
+    CASE WHEN v_completed_tasks > 0 
+      THEN (v_on_time_tasks::FLOAT / v_completed_tasks::FLOAT) * 100 
+      ELSE 0 
+    END,
+    v_total_duration,
+    v_period
+  )
+  ON CONFLICT (user_id, period) 
+  DO UPDATE SET
+    completed_tasks = EXCLUDED.completed_tasks,
+    on_time_completion = EXCLUDED.on_time_completion,
+    average_task_duration = EXCLUDED.average_task_duration;
+END;
 $$; 
