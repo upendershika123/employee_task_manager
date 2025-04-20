@@ -22,76 +22,83 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
   const [progress, setProgress] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const [isConnected, setIsConnected] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const databaseService = useDatabaseService();
 
   // Load saved progress when component mounts
   useEffect(() => {
+    let mounted = true;
+
     const loadSavedProgress = async () => {
+      if (!user?.id || !taskId) return;
+
       try {
-        console.log('Loading saved progress for task:', taskId);
+        console.log('Loading saved progress for task:', taskId, 'user:', user.id);
         const savedProgress = await databaseService.getTaskProgress(taskId);
         console.log('Loaded saved progress:', savedProgress);
         
-        if (savedProgress) {
+        if (mounted && savedProgress) {
           setInputText(savedProgress.currentText || '');
           setProgress(savedProgress.progressPercentage || 0);
           setLastSaved(savedProgress.lastUpdated);
+          console.log('Updated state with saved progress');
         }
       } catch (error) {
         console.error('Error loading saved progress:', error);
-        setError('Failed to load saved progress');
+        if (mounted) {
+          setError('Failed to load saved progress');
+          toast.error('Failed to load saved progress');
+        }
       }
     };
 
-    if (user?.id && taskId) {
-      loadSavedProgress();
-    }
+    loadSavedProgress();
+    return () => { mounted = false; };
   }, [taskId, user?.id, databaseService]);
 
   // Calculate progress based on text length and content
-  const calculateProgress = (text: string): number => {
-    if (!text.trim()) return 0;
+  const calculateProgress = useCallback((text: string): number => {
+    if (!text || !text.trim()) return 0;
     
     // Basic progress calculation based on text length
-    const minLength = 100; // Minimum expected length
-    const maxLength = 1000; // Maximum expected length for 100%
+    const minLength = 50; // Minimum expected length
+    const maxLength = 500; // Maximum expected length for 100%
     
     // Calculate base progress from length
     let lengthProgress = Math.min((text.length / maxLength) * 100, 100);
     
     // Additional factors
-    const hasParagraphs = text.includes('\n\n');
-    const hasProperSentences = text.match(/[.!?]\s/g)?.length > 3;
-    const hasGoodLength = text.length > minLength;
+    const paragraphs = text.split('\n\n').filter(p => p.trim().length > 0);
+    const sentences = text.match(/[.!?]+\s+/g) || [];
     
-    // Bonus progress for good structure
-    if (hasParagraphs) lengthProgress += 5;
-    if (hasProperSentences) lengthProgress += 5;
-    if (hasGoodLength) lengthProgress += 5;
+    // Bonus progress for structure and content
+    const hasParagraphs = paragraphs.length >= 2;
+    const hasProperSentences = sentences.length >= 3;
+    const hasGoodLength = text.length >= minLength;
     
-    // Cap at 100%
+    // Add bonuses
+    if (hasParagraphs) lengthProgress += 10;
+    if (hasProperSentences) lengthProgress += 10;
+    if (hasGoodLength) lengthProgress += 10;
+    
+    // Cap at 100% and round to nearest integer
     return Math.min(Math.round(lengthProgress), 100);
-  };
+  }, []);
 
-  // Debounced function to save progress
+  // Save progress with debounce
   const saveProgressDebounced = useCallback(
-    debounce(async (text: string) => {
+    debounce(async (text: string, currentProgress: number) => {
       if (!user?.id || !taskId) return;
 
       try {
         setIsSaving(true);
-        const calculatedProgress = calculateProgress(text);
-        console.log('Saving progress:', { taskId, progress: calculatedProgress });
+        console.log('Saving progress:', { taskId, text: text.substring(0, 50) + '...', progress: currentProgress });
         
-        await databaseService.saveTaskProgress(taskId, text, calculatedProgress);
-        setProgress(calculatedProgress);
+        await databaseService.saveTaskProgress(taskId, text, currentProgress);
         setLastSaved(new Date());
         setError(null);
 
-        // If progress is 100%, show completion message
-        if (calculatedProgress === 100) {
+        if (currentProgress === 100) {
           toast.success('Task completed successfully!');
         }
       } catch (error) {
@@ -106,17 +113,18 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
   );
 
   // Handle input changes
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setInputText(newText);
     
-    // Update progress immediately in UI
+    // Calculate and update progress
     const newProgress = calculateProgress(newText);
+    console.log('Calculated progress:', newProgress, 'for text length:', newText.length);
     setProgress(newProgress);
     
-    // Save to database with debounce
-    saveProgressDebounced(newText);
-  };
+    // Save to database
+    saveProgressDebounced(newText, newProgress);
+  }, [calculateProgress, saveProgressDebounced]);
 
   return (
     <Card className="w-full max-w-4xl mx-auto">
@@ -132,12 +140,6 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
               <span className="text-sm">{error}</span>
             </div>
           )}
-          {!isConnected && (
-            <div className="flex items-center gap-2 text-yellow-500 bg-yellow-50 p-2 rounded-md">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-sm">Offline mode - progress will be saved when connection is restored</span>
-            </div>
-          )}
           <Textarea
             placeholder="Start typing here..."
             value={inputText}
@@ -147,18 +149,18 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Progress</span>
-              <span>{progress.toFixed(1)}%</span>
+              <span>{progress}%</span>
             </div>
             <Progress value={progress} className="w-full" />
           </div>
-          {lastSaved && (
-            <p className="text-sm text-muted-foreground">
-              Last saved: {lastSaved.toLocaleTimeString()}
-            </p>
-          )}
-          {isSaving && (
-            <p className="text-sm text-muted-foreground">Saving...</p>
-          )}
+          <div className="text-sm text-muted-foreground space-y-1">
+            {lastSaved && (
+              <p>Last saved: {lastSaved.toLocaleTimeString()}</p>
+            )}
+            {isSaving && (
+              <p>Saving...</p>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
