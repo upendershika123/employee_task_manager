@@ -17,7 +17,7 @@ export class DatabaseServiceImpl implements DatabaseService {
         .from('task_input_history')
         .select('*')
         .eq('task_id', taskId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Error fetching task progress:', {
@@ -37,9 +37,9 @@ export class DatabaseServiceImpl implements DatabaseService {
       return {
         taskId: data.task_id,
         userId: data.user_id,
-        currentText: data.input_text,
-        lastUpdated: new Date(data.created_at),
-        progressPercentage: data.progress
+        currentText: data.input_text || '',
+        lastUpdated: new Date(data.updated_at || data.created_at),
+        progressPercentage: data.progress || 0
       };
     } catch (error) {
       console.error('Error in getTaskProgress:', error);
@@ -57,12 +57,19 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw new Error('Database connection failed');
       }
 
+      const timestamp = new Date().toISOString();
+      const userId = this.supabase.auth.getUser().then(response => response.data.user?.id);
+
+      if (!userId) {
+        throw new Error('User not authenticated');
+      }
+
       // Check if entry exists
       const { data: existing, error: fetchError } = await this.supabase
         .from('task_input_history')
         .select('id')
         .eq('task_id', taskId)
-        .single();
+        .maybeSingle();
 
       if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
         console.error('Error fetching existing progress:', {
@@ -75,8 +82,6 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw fetchError;
       }
 
-      const timestamp = new Date().toISOString();
-      
       if (existing) {
         // Update existing entry
         const { error: updateError } = await this.supabase
@@ -104,6 +109,7 @@ export class DatabaseServiceImpl implements DatabaseService {
           .from('task_input_history')
           .insert({
             task_id: taskId,
+            user_id: await userId,
             input_text: inputText,
             progress: progress,
             created_at: timestamp,
