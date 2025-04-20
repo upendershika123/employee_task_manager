@@ -14,9 +14,17 @@ console.log('Environment Variables Debug:', {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
-const appUrl = import.meta.env.MODE === 'production' 
-  ? import.meta.env.VITE_APP_URL 
-  : window.location.origin;
+
+// Get the app URL, ensuring it doesn't end with a slash
+const getAppUrl = () => {
+  if (import.meta.env.MODE === 'production') {
+    const url = import.meta.env.VITE_APP_URL || window.location.origin;
+    return url.endsWith('/') ? url.slice(0, -1) : url;
+  }
+  return window.location.origin;
+};
+
+const appUrl = getAppUrl();
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Environment Variables Status:', {
