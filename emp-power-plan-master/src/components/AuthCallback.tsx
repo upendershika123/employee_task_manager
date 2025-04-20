@@ -19,19 +19,33 @@ export function AuthCallback() {
         if (type === 'recovery' && code) {
           console.log('Processing recovery code');
           
-          // Exchange the code for a session
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          
-          if (error) {
-            console.error('Error exchanging code for session:', error);
-            toast.error('Invalid or expired recovery link. Please request a new one.');
-            navigate('/login');
-            return;
-          }
+          try {
+            // Exchange the code for a session
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+            
+            if (error) {
+              console.error('Error exchanging code for session:', error);
+              if (error.message.includes('both auth code and code verifier should be non-empty')) {
+                // Clear any stored auth state
+                localStorage.removeItem('supabase.auth.token');
+                // Redirect to reset password page directly
+                navigate('/reset-password');
+                return;
+              }
+              toast.error('Invalid or expired recovery link. Please request a new one.');
+              navigate('/login');
+              return;
+            }
 
-          if (data?.session) {
-            console.log('Successfully exchanged code for session');
-            // Redirect to password reset page
+            if (data?.session) {
+              console.log('Successfully exchanged code for session');
+              // Redirect to password reset page
+              navigate('/reset-password');
+              return;
+            }
+          } catch (error) {
+            console.error('Error in recovery code exchange:', error);
+            // If there's an error, still try to redirect to reset password
             navigate('/reset-password');
             return;
           }
@@ -56,8 +70,8 @@ export function AuthCallback() {
         navigate('/login');
       } catch (error) {
         console.error('Error in auth callback:', error);
-        toast.error('An error occurred during verification. Please try again.');
-        navigate('/login');
+        // If there's an error, try to redirect to reset password
+        navigate('/reset-password');
       } finally {
         setIsLoading(false);
       }
