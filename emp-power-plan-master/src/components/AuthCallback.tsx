@@ -11,94 +11,49 @@ export function AuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        console.log('Auth callback triggered with URL:', window.location.href);
+        const type = searchParams.get('type');
+        const code = searchParams.get('code');
         
-        // Get the hash parameters from the URL
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const type = hashParams.get('type');
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
+        console.log('Auth callback params:', { type, code: !!code });
 
-        console.log('Hash params:', { type, accessToken: !!accessToken, refreshToken: !!refreshToken });
-
-        if (accessToken && refreshToken) {
-          console.log('Setting session with tokens');
-          // Set the session
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-
-          if (sessionError) {
-            console.error('Error setting session:', sessionError);
-            toast.error('Failed to set session. Please try again.');
+        if (type === 'recovery' && code) {
+          console.log('Processing recovery code');
+          
+          // Exchange the code for a session
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          
+          if (error) {
+            console.error('Error exchanging code for session:', error);
+            toast.error('Invalid or expired recovery link. Please request a new one.');
             navigate('/login');
             return;
           }
 
-          // Get the current user
-          const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-          if (userError || !user) {
-            console.error('Error getting user:', userError);
-            toast.error('Failed to get user information. Please try again.');
-            navigate('/login');
-            return;
-          }
-
-          console.log('User authenticated:', user.email);
-
-          if (type === 'recovery') {
+          if (data?.session) {
+            console.log('Successfully exchanged code for session');
             // Redirect to password reset page
-            console.log('Redirecting to password reset page');
             navigate('/reset-password');
             return;
           }
-
-          // If it's a verification, redirect to login
-          toast.success('Account verified successfully! Please log in.');
-          navigate('/login');
-        } else {
-          // Check if this is a password reset link
-          const type = searchParams.get('type');
-          const token = searchParams.get('token');
-          
-          console.log('Search params:', { type, token: !!token });
-          
-          if (type === 'recovery' && token) {
-            console.log('Processing recovery token');
-            // Set the session with the token
-            const { error: sessionError } = await supabase.auth.setSession({
-              access_token: token,
-              refresh_token: ''
-            });
-
-            if (sessionError) {
-              console.error('Error setting session:', sessionError);
-              toast.error('Failed to set session. Please try again.');
-              navigate('/login');
-              return;
-            }
-
-            // Redirect to password reset page
-            console.log('Redirecting to password reset page');
-            navigate('/reset-password');
-            return;
-          }
-          
-          // Check if this is a magic link or invite link
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
-          if (session && !sessionError) {
-            console.log('Valid session found, redirecting to reset password');
-            navigate('/reset-password');
-            return;
-          }
-
-          console.error('No valid authentication found in URL');
-          toast.error('Invalid verification link. Please try again.');
-          navigate('/login');
         }
+
+        // Handle other types of callbacks (verification, magic link, etc.)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (session && !sessionError) {
+          console.log('Valid session found');
+          if (type === 'recovery') {
+            navigate('/reset-password');
+          } else {
+            toast.success('Account verified successfully! Please log in.');
+            navigate('/login');
+          }
+          return;
+        }
+
+        console.error('No valid authentication found in URL');
+        toast.error('Invalid verification link. Please try again.');
+        navigate('/login');
       } catch (error) {
         console.error('Error in auth callback:', error);
         toast.error('An error occurred during verification. Please try again.');
@@ -116,7 +71,7 @@ export function AuthCallback() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-lg">Verifying your account...</p>
+          <p className="mt-4 text-lg">Processing your request...</p>
         </div>
       </div>
     );
