@@ -63,6 +63,27 @@ class NotificationService {
         needs_improvement: `Your task "${task.title}" needs improvement. Please update and resubmit.`
       };
 
+      // Verify task exists in either tasks or completed_tasks table
+      const { data: taskExists, error: taskError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('id', task.id)
+        .maybeSingle();
+
+      // If not found in tasks table, check completed_tasks
+      if (taskError || !taskExists) {
+        const { data: completedTask, error: completedTaskError } = await supabase
+          .from('completed_tasks')
+          .select('*')
+          .eq('task_id', task.id)
+          .maybeSingle();
+
+        if (completedTaskError || !completedTask) {
+          console.warn('Task not found in either tasks or completed_tasks table:', task.id);
+          return;
+        }
+      }
+
       // Create in-app notification
       await this.createNotification({
         userId: task.assigned_to,
@@ -88,6 +109,31 @@ class NotificationService {
 
   async createNotification(notification: Omit<Notification, 'id' | 'read' | 'createdAt'>): Promise<void> {
     try {
+      // Verify task exists if taskId is provided
+      if (notification.taskId) {
+        // Check in tasks table first
+        const { data: task, error: taskError } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', notification.taskId)
+          .maybeSingle();
+
+        // If not found in tasks table, check completed_tasks
+        if (taskError || !task) {
+          const { data: completedTask, error: completedTaskError } = await supabase
+            .from('completed_tasks')
+            .select('*')
+            .eq('task_id', notification.taskId)
+            .maybeSingle();
+
+          if (completedTaskError || !completedTask) {
+            console.warn('Task not found in either tasks or completed_tasks table:', notification.taskId);
+            // Remove taskId if task doesn't exist in either table
+            delete notification.taskId;
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('notifications')
         .insert({
@@ -97,7 +143,7 @@ class NotificationService {
           type: notification.type,
           read: false,
           created_at: new Date().toISOString(),
-          task_id: notification.taskId,
+          task_id: notification.taskId || null,
         });
 
       if (error) {
