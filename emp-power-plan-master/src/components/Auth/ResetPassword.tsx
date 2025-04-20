@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Lock } from 'lucide-react';
 
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -18,15 +19,63 @@ const ResetPassword: React.FC = () => {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // First, try to get the current session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
-        if (error || !session) {
-          console.error('No valid session found:', error);
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          // If there's a session error, try to exchange the code
+          const code = searchParams.get('code');
+          if (code) {
+            console.log('Attempting to exchange code for session');
+            const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            
+            if (exchangeError) {
+              console.error('Error exchanging code:', exchangeError);
+              toast.error('Invalid or expired reset link. Please request a new one.');
+              navigate('/login');
+              return;
+            }
+            
+            if (data?.session) {
+              console.log('Successfully exchanged code for session');
+              setIsSessionValid(true);
+              return;
+            }
+          }
+          
           toast.error('Invalid or expired session. Please request a new password reset link.');
           navigate('/login');
           return;
         }
         
+        if (!session) {
+          console.log('No session found, checking for code');
+          const code = searchParams.get('code');
+          if (code) {
+            console.log('Attempting to exchange code for session');
+            const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            
+            if (exchangeError) {
+              console.error('Error exchanging code:', exchangeError);
+              toast.error('Invalid or expired reset link. Please request a new one.');
+              navigate('/login');
+              return;
+            }
+            
+            if (data?.session) {
+              console.log('Successfully exchanged code for session');
+              setIsSessionValid(true);
+              return;
+            }
+          }
+          
+          toast.error('Invalid or expired session. Please request a new password reset link.');
+          navigate('/login');
+          return;
+        }
+        
+        console.log('Valid session found');
         setIsSessionValid(true);
       } catch (error) {
         console.error('Error checking session:', error);
@@ -36,7 +85,7 @@ const ResetPassword: React.FC = () => {
     };
     
     checkSession();
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
