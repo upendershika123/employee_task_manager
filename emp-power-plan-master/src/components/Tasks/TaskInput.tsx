@@ -28,6 +28,7 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
   const maxRetries = 3;
   const retryDelay = 2000; // 2 seconds
   const progressRef = useRef({ text: '', progress: 0 });
+  const initialLoadDone = useRef(false);
 
   // Load saved progress when component mounts
   useEffect(() => {
@@ -44,17 +45,21 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
         
         if (mounted && savedProgress) {
           const savedText = savedProgress.currentText || '';
-          const savedProgress = savedProgress.progressPercentage || 0;
+          const calculatedProgress = calculateProgress(savedText);
           
           setInputText(savedText);
-          setProgress(savedProgress);
+          setProgress(calculatedProgress);
           setLastSaved(savedProgress.lastUpdated);
           
           // Keep a reference for recovery
-          progressRef.current = { text: savedText, progress: savedProgress };
+          progressRef.current = { text: savedText, progress: calculatedProgress };
           
-          console.log('Updated state with saved progress');
+          console.log('Updated state with saved progress:', {
+            text: savedText.substring(0, 50) + '...',
+            progress: calculatedProgress
+          });
         }
+        initialLoadDone.current = true;
       } catch (error) {
         console.error('Error loading saved progress:', error);
         if (mounted) {
@@ -74,10 +79,40 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
     return () => { mounted = false; };
   }, [taskId, user?.id, databaseService]);
 
+  // Calculate progress based on text length and content
+  const calculateProgress = useCallback((text: string): number => {
+    if (!text || !text.trim()) return 0;
+    
+    // Basic progress calculation based on text length
+    const minLength = 50; // Minimum expected length
+    const maxLength = 500; // Maximum expected length for 100%
+    
+    // Calculate base progress from length
+    let lengthProgress = Math.min((text.length / maxLength) * 100, 100);
+    
+    // Additional factors
+    const paragraphs = text.split('\n\n').filter(p => p.trim().length > 0);
+    const sentences = text.match(/[.!?]+\s+/g) || [];
+    
+    // Bonus progress for structure and content
+    const hasParagraphs = paragraphs.length >= 2;
+    const hasProperSentences = sentences.length >= 3;
+    const hasGoodLength = text.length >= minLength;
+    
+    // Add bonuses (but ensure we don't exceed 100%)
+    let totalProgress = lengthProgress;
+    if (hasParagraphs) totalProgress = Math.min(totalProgress + 10, 100);
+    if (hasProperSentences) totalProgress = Math.min(totalProgress + 10, 100);
+    if (hasGoodLength) totalProgress = Math.min(totalProgress + 10, 100);
+    
+    // Round to nearest integer
+    return Math.round(totalProgress);
+  }, []);
+
   // Save progress with debounce and retry logic
   const saveProgressDebounced = useCallback(
     debounce(async (text: string, currentProgress: number) => {
-      if (!user?.id || !taskId) return;
+      if (!user?.id || !taskId || !initialLoadDone.current) return;
 
       const attemptSave = async (attempt: number = 0) => {
         try {
@@ -121,45 +156,16 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
       };
 
       attemptSave();
-    }, 2000), // Increased debounce time for better network handling
+    }, 1000), // Reduced debounce time for better responsiveness
     [taskId, user?.id, databaseService]
   );
-
-  // Calculate progress based on text length and content
-  const calculateProgress = useCallback((text: string): number => {
-    if (!text || !text.trim()) return 0;
-    
-    // Basic progress calculation based on text length
-    const minLength = 50; // Minimum expected length
-    const maxLength = 500; // Maximum expected length for 100%
-    
-    // Calculate base progress from length
-    let lengthProgress = Math.min((text.length / maxLength) * 100, 100);
-    
-    // Additional factors
-    const paragraphs = text.split('\n\n').filter(p => p.trim().length > 0);
-    const sentences = text.match(/[.!?]+\s+/g) || [];
-    
-    // Bonus progress for structure and content
-    const hasParagraphs = paragraphs.length >= 2;
-    const hasProperSentences = sentences.length >= 3;
-    const hasGoodLength = text.length >= minLength;
-    
-    // Add bonuses
-    if (hasParagraphs) lengthProgress += 10;
-    if (hasProperSentences) lengthProgress += 10;
-    if (hasGoodLength) lengthProgress += 10;
-    
-    // Cap at 100% and round to nearest integer
-    return Math.min(Math.round(lengthProgress), 100);
-  }, []);
 
   // Handle input changes with optimistic updates
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setInputText(newText);
     
-    // Calculate and update progress
+    // Calculate and update progress immediately
     const newProgress = calculateProgress(newText);
     console.log('Calculated progress:', newProgress, 'for text length:', newText.length);
     setProgress(newProgress);
@@ -197,6 +203,11 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
               <span>{progress}%</span>
             </div>
             <Progress value={progress} className="w-full" />
+            <div className="text-xs text-muted-foreground">
+              <p>Minimum length: 50 characters</p>
+              <p>Optimal length: 500+ characters</p>
+              <p>Bonus points for multiple paragraphs and proper sentences</p>
+            </div>
           </div>
           <div className="text-sm text-muted-foreground space-y-1">
             {lastSaved && (
