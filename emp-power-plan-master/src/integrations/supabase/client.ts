@@ -51,15 +51,32 @@ const clientOptions = {
     storageKey: 'supabase.auth.token',
     storage: {
       getItem: (key: string) => {
-        const item = localStorage.getItem(key);
-        return item ? JSON.parse(item) : null;
+        try {
+          const item = localStorage.getItem(key);
+          return item ? JSON.parse(item) : null;
+        } catch (error) {
+          console.error('Error getting item from storage:', error);
+          return null;
+        }
       },
       setItem: (key: string, value: any) => {
-        localStorage.setItem(key, JSON.stringify(value));
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+          console.error('Error setting item in storage:', error);
+        }
       },
       removeItem: (key: string) => {
-        localStorage.removeItem(key);
+        try {
+          localStorage.removeItem(key);
+        } catch (error) {
+          console.error('Error removing item from storage:', error);
+        }
       }
+    },
+    debug: true, // Enable debug mode for auth
+    onAuthStateChange: (event: string, session: any) => {
+      console.log('Auth state changed:', event, session);
     }
   },
   global: {
@@ -76,7 +93,20 @@ export const supabase = (() => {
     return null;
   }
   clientInitialized = true;
-  return createClient<Database>(supabaseUrl, supabaseAnonKey, clientOptions);
+  const client = createClient<Database>(supabaseUrl, supabaseAnonKey, clientOptions);
+  
+  // Add error handling for PKCE flow
+  client.auth.onAuthStateChange((event, session) => {
+    if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+      console.log('Auth state changed:', event, session);
+    } else if (event === 'SIGNED_OUT') {
+      console.log('User signed out');
+    } else if (event === 'USER_UPDATED') {
+      console.log('User updated:', session?.user);
+    }
+  });
+
+  return client;
 })();
 
 // Create a separate client with the service key for admin operations
