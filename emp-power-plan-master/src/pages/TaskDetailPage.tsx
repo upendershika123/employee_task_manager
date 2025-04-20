@@ -23,12 +23,12 @@ const TaskDetailPage: React.FC = () => {
           setTask(data);
         } else {
           toast.error('Failed to load task');
-          navigate('/');
+          navigate('/dashboard');
         }
       } catch (error) {
         console.error('Error fetching task:', error);
         toast.error('Failed to load task');
-        navigate('/');
+        navigate('/dashboard');
       } finally {
         setIsLoading(false);
       }
@@ -54,7 +54,7 @@ const TaskDetailPage: React.FC = () => {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <h2 className="text-xl font-medium">Task not found</h2>
-          <Button onClick={() => navigate('/')} className="mt-4">
+          <Button onClick={() => navigate('/dashboard')} className="mt-4">
             Go back to dashboard
           </Button>
         </div>
@@ -67,7 +67,7 @@ const TaskDetailPage: React.FC = () => {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/dashboard')}
           className="flex items-center gap-2"
         >
           <ArrowLeft className="h-4 w-4" />

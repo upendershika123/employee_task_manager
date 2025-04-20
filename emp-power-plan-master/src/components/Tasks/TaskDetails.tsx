@@ -114,7 +114,7 @@ const TaskDetails: React.FC<{}> = () => {
         // 2. Task is completed and user is a reviewer (team lead/admin)
         if (!isAssignedUser && !(isCompleted && isReviewer)) {
           toast.error('You are not authorized to access this task');
-          navigate('/');
+          navigate('/dashboard');
           return;
         }
         
@@ -372,7 +372,7 @@ const TaskDetails: React.FC<{}> = () => {
       }
       
       toast.success('Task submitted for review');
-      navigate('/');
+      navigate('/dashboard');
     } catch (error) {
       console.error('Error submitting task:', error);
       toast.error('Failed to submit task');
@@ -385,11 +385,11 @@ const TaskDetails: React.FC<{}> = () => {
     if (hasUnsavedChanges) {
       const shouldSave = window.confirm('You have unsaved changes. Would you like to save before leaving?');
       if (shouldSave) {
-        handleSaveProgress().then(() => navigate('/'));
+        handleSaveProgress().then(() => navigate('/dashboard'));
         return;
       }
     }
-    navigate('/');
+    navigate('/dashboard');
   };
 
   const getPriorityColor = (priority: string) => {

@@ -127,7 +127,7 @@ const AutomaticTasksPage: React.FC = () => {
   };
 
   const handleBackToDashboard = () => {
-    navigate('/');
+    navigate('/dashboard');
   };
 
   if (loading) {

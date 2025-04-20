@@ -72,7 +72,7 @@ const NotificationDetails: React.FC = () => {
   }, [notificationId, databaseService]);
 
   const handleBack = () => {
-    navigate('/');
+    navigate('/dashboard');
   };
 
   const handleViewTask = () => {

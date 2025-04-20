@@ -19,6 +19,7 @@ import PerformancePage from '@/components/Performance/PerformancePage';
 import AutomaticTasksPage from '@/components/AutomaticTasks/AutomaticTasksPage';
 import NotificationDetails from '@/components/Notifications/NotificationDetails';
 import CompletedTasksPage from '@/components/Tasks/CompletedTasksPage';
+import LandingPage from '@/pages/LandingPage';
 
 const queryClient = new QueryClient();
 
@@ -52,7 +53,8 @@ const App = () => {
             <Sonner />
             <Router>
               <Routes>
-                <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
                 <Route path="/login" element={<LoginForm />} />
                 <Route path="/register" element={<RegisterForm />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
@@ -63,7 +65,7 @@ const App = () => {
                 <Route path="/tasks/:taskId" element={<PrivateRoute><TaskDetails /></PrivateRoute>} />
                 <Route path="/completed-tasks" element={<PrivateRoute><CompletedTasksPage /></PrivateRoute>} />
                 <Route path="/notifications/:notificationId" element={<PrivateRoute><NotificationDetails /></PrivateRoute>} />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </Router>
           </TooltipProvider>

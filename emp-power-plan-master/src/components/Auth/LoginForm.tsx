@@ -33,7 +33,7 @@ const LoginForm: React.FC = () => {
     setIsLoading(true);
     try {
       await login(formData.email, formData.password);
-      navigate('/');
+      navigate('/dashboard');
     } catch (error) {
       // Error handling is done in the service
     } finally {
@@ -59,77 +59,81 @@ const LoginForm: React.FC = () => {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto mt-8">
-      <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-2">
-          <div className="rounded-full bg-primary/10 p-3">
-            <Briefcase className="w-8 h-8 text-primary" />
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-2">
+            <div className="rounded-full bg-primary/10 p-3">
+              <Briefcase className="w-8 h-8 text-primary" />
+            </div>
           </div>
-        </div>
-        <CardTitle className="text-2xl font-bold">Employee Task Management</CardTitle>
-        <CardDescription>
-          Enter your credentials to access your dashboard
-        </CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit}>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="name@example.com"
-              required
-              value={formData.email}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              placeholder="••••••••"
-              required
-              value={formData.password}
-              onChange={handleChange}
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Logging in...' : 'Log in'}
-          </Button>
-          
-          <div className="flex items-center justify-between w-full text-sm">
+          <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
+          <CardDescription>
+            Enter your credentials to access your dashboard
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="name@example.com"
+                required
+                value={formData.email}
+                onChange={handleChange}
+                className="w-full"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                required
+                value={formData.password}
+                onChange={handleChange}
+                className="w-full"
+              />
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col space-y-4">
             <Button
-              type="button"
-              variant="ghost"
-              onClick={handleResendVerification}
-              disabled={isResending}
-              className="text-primary hover:text-primary/80"
+              type="submit"
+              className="w-full primary-button"
+              disabled={isLoading}
             >
-              {isResending ? 'Sending...' : 'Resend verification email'}
+              {isLoading ? 'Logging in...' : 'Log in'}
             </Button>
+            
+            <div className="flex items-center justify-between w-full text-sm">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleResendVerification}
+                disabled={isResending}
+                className="text-primary hover:text-primary/80"
+              >
+                {isResending ? 'Sending...' : 'Resend verification email'}
+              </Button>
 
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => navigate('/register')}
-              className="text-primary hover:text-primary/80"
-            >
-              Create an account
-            </Button>
-          </div>
-        </CardFooter>
-      </form>
-    </Card>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => navigate('/register')}
+                className="text-primary hover:text-primary/80"
+              >
+                Create an account
+              </Button>
+            </div>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
   );
 };
 

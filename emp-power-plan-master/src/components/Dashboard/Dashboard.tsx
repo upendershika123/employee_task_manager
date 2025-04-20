@@ -336,7 +336,7 @@ const Dashboard: React.FC = () => {
     setSelectedOption(value);
     switch (value) {
       case 'home':
-        navigate('/');
+        navigate('/dashboard');
         break;
       case 'dashboard':
         navigate('/dashboard');

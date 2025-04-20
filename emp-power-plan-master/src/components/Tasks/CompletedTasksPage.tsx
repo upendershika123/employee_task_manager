@@ -68,7 +68,7 @@ const CompletedTasksPage: React.FC = () => {
   }, [user]);
 
   const handleBack = () => {
-    navigate('/');
+    navigate('/dashboard');
   };
 
   const handleTaskClick = (taskId: string) => {

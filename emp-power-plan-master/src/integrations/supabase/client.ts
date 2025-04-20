@@ -55,7 +55,6 @@ const clientOptions = {
           const item = localStorage.getItem(key);
           if (item) {
             const parsed = JSON.parse(item);
-            console.log('Retrieved from storage:', { key, value: parsed });
             return parsed;
           }
           return null;
@@ -66,7 +65,6 @@ const clientOptions = {
       },
       setItem: (key: string, value: any) => {
         try {
-          console.log('Storing in storage:', { key, value });
           localStorage.setItem(key, JSON.stringify(value));
         } catch (error) {
           console.error('Error setting item in storage:', error);
@@ -74,19 +72,24 @@ const clientOptions = {
       },
       removeItem: (key: string) => {
         try {
-          console.log('Removing from storage:', key);
           localStorage.removeItem(key);
         } catch (error) {
           console.error('Error removing item from storage:', error);
         }
       }
     },
-    debug: true, // Enable debug mode for auth
+    debug: true,
     onAuthStateChange: (event: AuthChangeEvent, session: Session | null) => {
       console.log('Auth state changed:', event, session);
-    },
-    // Add email link handling
-    emailRedirectTo: `${appUrl}/auth/callback`
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Store the session in localStorage
+        if (session) {
+          localStorage.setItem('supabase.auth.token', JSON.stringify(session));
+        }
+      } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('supabase.auth.token');
+      }
+    }
   },
   global: {
     headers: {

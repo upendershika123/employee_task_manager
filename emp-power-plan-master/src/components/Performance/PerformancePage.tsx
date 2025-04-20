@@ -593,7 +593,7 @@ const PerformancePage: React.FC = () => {
   }, [user, databaseService]);
 
   const handleBackToDashboard = () => {
-    navigate('/');
+    navigate('/dashboard');
   };
 
   // If user is not logged in or is not authorized, redirect to dashboard

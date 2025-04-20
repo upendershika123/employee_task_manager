@@ -195,7 +195,7 @@ const UserPerformancePage: React.FC = () => {
 
   // If user is not logged in or is not authorized, redirect to dashboard
   if (!user) {
-    navigate('/');
+    navigate('/dashboard');
     return null;
   }
 
