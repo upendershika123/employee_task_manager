@@ -7,7 +7,8 @@ console.log('Environment Variables Debug:', {
   VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL ? 'Set' : 'Not Set',
   VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY ? 'Set' : 'Not Set',
   VITE_APP_URL: import.meta.env.VITE_APP_URL ? 'Set' : 'Not Set',
-  MODE: import.meta.env.MODE // This will show if we're in development or production
+  MODE: import.meta.env.MODE, // This will show if we're in development or production
+  ORIGIN: window.location.origin // Log the current origin for debugging
 });
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -28,26 +29,35 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-// Create two clients - one for regular operations and one for admin operations
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+// Common client options
+const clientOptions = {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
     flowType: 'pkce',
     redirectTo: `${appUrl}/auth/callback`
+  },
+  global: {
+    headers: {
+      'X-Client-Info': 'emp-power-plan@1.0.0',
+    }
   }
-});
+};
+
+// Create two clients - one for regular operations and one for admin operations
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, clientOptions);
 
 // Create a separate client with the service key for admin operations
 export const supabaseAdmin = supabaseServiceKey
-  ? createClient<Database>(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
-        flowType: 'pkce',
-        redirectTo: `${appUrl}/auth/callback`
-      }
-    })
+  ? createClient<Database>(supabaseUrl, supabaseServiceKey, clientOptions)
   : supabase;
+
+// Log the current configuration for debugging
+console.log('Supabase Configuration:', {
+  url: supabaseUrl,
+  hasAnonKey: !!supabaseAnonKey,
+  hasServiceKey: !!supabaseServiceKey,
+  appUrl,
+  origin: window.location.origin
+});

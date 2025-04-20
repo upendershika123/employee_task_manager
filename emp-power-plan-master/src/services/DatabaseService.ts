@@ -11,13 +11,26 @@ export class DatabaseServiceImpl implements DatabaseService {
 
   async getTaskProgress(taskId: string): Promise<TaskProgress | null> {
     try {
+      console.log('Fetching task progress for:', taskId);
+      
       const { data, error } = await this.supabase
         .from('task_input_history')
         .select('*')
         .eq('task_id', taskId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching task progress:', {
+          error,
+          taskId,
+          errorCode: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
+
+      console.log('Task progress data:', data);
 
       if (!data) return null;
 
@@ -29,13 +42,15 @@ export class DatabaseServiceImpl implements DatabaseService {
         progressPercentage: data.progress
       };
     } catch (error) {
-      console.error('Error fetching task progress:', error);
+      console.error('Error in getTaskProgress:', error);
       return null;
     }
   }
 
   async saveTaskProgress(taskId: string, inputText: string, progress: number): Promise<void> {
     try {
+      console.log('Saving task progress:', { taskId, progress });
+      
       // Test database connection first
       const isConnected = await this.testConnection();
       if (!isConnected) {
@@ -50,10 +65,18 @@ export class DatabaseServiceImpl implements DatabaseService {
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-        console.error('Error fetching existing progress:', fetchError);
+        console.error('Error fetching existing progress:', {
+          error: fetchError,
+          taskId,
+          errorCode: fetchError.code,
+          details: fetchError.details,
+          hint: fetchError.hint
+        });
         throw fetchError;
       }
 
+      const timestamp = new Date().toISOString();
+      
       if (existing) {
         // Update existing entry
         const { error: updateError } = await this.supabase
@@ -61,12 +84,18 @@ export class DatabaseServiceImpl implements DatabaseService {
           .update({
             input_text: inputText,
             progress: progress,
-            created_at: new Date().toISOString()
+            updated_at: timestamp
           })
           .eq('task_id', taskId);
 
         if (updateError) {
-          console.error('Error updating progress:', updateError);
+          console.error('Error updating progress:', {
+            error: updateError,
+            taskId,
+            errorCode: updateError.code,
+            details: updateError.details,
+            hint: updateError.hint
+          });
           throw updateError;
         }
       } else {
@@ -77,24 +106,30 @@ export class DatabaseServiceImpl implements DatabaseService {
             task_id: taskId,
             input_text: inputText,
             progress: progress,
-            created_at: new Date().toISOString()
+            created_at: timestamp,
+            updated_at: timestamp
           });
 
         if (insertError) {
-          console.error('Error inserting progress:', insertError);
+          console.error('Error inserting progress:', {
+            error: insertError,
+            taskId,
+            errorCode: insertError.code,
+            details: insertError.details,
+            hint: insertError.hint
+          });
           throw insertError;
         }
       }
+      
+      console.log('Task progress saved successfully');
     } catch (error) {
-      console.error('Error saving task progress:', error);
-      // Add more detailed error information
-      if (error instanceof Error) {
-        console.error('Error details:', {
-          message: error.message,
-          stack: error.stack,
-          name: error.name
-        });
-      }
+      console.error('Error in saveTaskProgress:', {
+        error,
+        taskId,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       throw error;
     }
   }
