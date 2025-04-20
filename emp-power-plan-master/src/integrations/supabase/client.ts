@@ -53,7 +53,12 @@ const clientOptions = {
       getItem: (key: string) => {
         try {
           const item = localStorage.getItem(key);
-          return item ? JSON.parse(item) : null;
+          if (item) {
+            const parsed = JSON.parse(item);
+            console.log('Retrieved from storage:', { key, value: parsed });
+            return parsed;
+          }
+          return null;
         } catch (error) {
           console.error('Error getting item from storage:', error);
           return null;
@@ -61,6 +66,7 @@ const clientOptions = {
       },
       setItem: (key: string, value: any) => {
         try {
+          console.log('Storing in storage:', { key, value });
           localStorage.setItem(key, JSON.stringify(value));
         } catch (error) {
           console.error('Error setting item in storage:', error);
@@ -68,6 +74,7 @@ const clientOptions = {
       },
       removeItem: (key: string) => {
         try {
+          console.log('Removing from storage:', key);
           localStorage.removeItem(key);
         } catch (error) {
           console.error('Error removing item from storage:', error);
@@ -112,13 +119,17 @@ export const supabase = (() => {
     }
   });
 
-  // Handle email link errors
+  // Handle email link errors and PKCE flow
   client.auth.getSession().then(({ data: { session }, error }) => {
-    if (error?.message?.includes('Email link is invalid or has expired')) {
-      // Clear any stored auth state
-      localStorage.removeItem('supabase.auth.token');
-      // Redirect to login page
-      window.location.href = '/login';
+    if (error) {
+      console.error('Session error:', error);
+      if (error.message.includes('Email link is invalid or has expired') || 
+          error.message.includes('both auth code and code verifier should be non-empty')) {
+        // Clear any stored auth state
+        localStorage.removeItem('supabase.auth.token');
+        // Redirect to login page
+        window.location.href = '/login';
+      }
     }
   }).catch((error) => {
     console.error('Error checking session:', error);
