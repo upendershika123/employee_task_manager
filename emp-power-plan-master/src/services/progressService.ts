@@ -33,82 +33,30 @@ export class ProgressService {
     try {
       this.isLoading = true;
       
-      // Try loading from the public directory using relative path
-      const publicPath = './reference_texts/sample-task.txt';
-      console.log('Attempting to load reference text from:', publicPath);
+      // Use the BASE_URL environment variable which is set by Vite
+      const baseUrl = import.meta.env.BASE_URL || '/';
+      const referencePath = `${baseUrl}reference_texts/sample-task.txt`;
       
-      try {
-        const response = await fetch(publicPath);
-        
-        if (response.ok) {
-          const text = await response.text();
-          if (text && text.trim()) {
-            this.referenceText = text;
-            console.log('Successfully loaded reference text from public path');
-            return;
-          }
+      console.log('Attempting to load reference text from:', referencePath);
+      
+      const response = await fetch(referencePath);
+      
+      if (response.ok) {
+        const text = await response.text();
+        if (text && text.trim()) {
+          this.referenceText = text;
+          console.log('Successfully loaded reference text');
+          return;
         }
-        
-        console.warn('Could not load from relative path, trying absolute path:', {
-          status: response.status,
-          statusText: response.statusText,
-          publicPath
-        });
-      } catch (fetchError) {
-        console.warn('Error loading from relative path:', fetchError);
       }
       
-      // Try with absolute path
-      const absolutePath = '/reference_texts/sample-task.txt';
-      console.log('Attempting to load from absolute path:', absolutePath);
-      
-      try {
-        const absoluteResponse = await fetch(absolutePath);
-        
-        if (absoluteResponse.ok) {
-          const text = await absoluteResponse.text();
-          if (text && text.trim()) {
-            this.referenceText = text;
-            console.log('Successfully loaded reference text from absolute path');
-            return;
-          }
-        }
-        
-        console.warn('Could not load from absolute path:', {
-          status: absoluteResponse.status,
-          statusText: absoluteResponse.statusText,
-          absolutePath
-        });
-      } catch (fetchError) {
-        console.warn('Error loading from absolute path:', fetchError);
-      }
-      
-      // Try with BASE_URL as last resort
-      const baseUrlPath = `${import.meta.env.BASE_URL || '/'}reference_texts/sample-task.txt`;
-      console.log('Attempting to load from BASE_URL path:', baseUrlPath);
-      
-      try {
-        const baseUrlResponse = await fetch(baseUrlPath);
-        
-        if (baseUrlResponse.ok) {
-          const text = await baseUrlResponse.text();
-          if (text && text.trim()) {
-            this.referenceText = text;
-            console.log('Successfully loaded reference text from BASE_URL path');
-            return;
-          }
-        }
-        
-        console.warn('Failed to load reference text from all paths, using default:', {
-          status: baseUrlResponse.status,
-          statusText: baseUrlResponse.statusText,
-          baseUrlPath
-        });
-      } catch (fetchError) {
-        console.warn('Error loading from BASE_URL path:', fetchError);
-      }
+      console.warn('Failed to load reference text, using default:', {
+        status: response.status,
+        statusText: response.statusText,
+        path: referencePath
+      });
     } catch (error) {
-      console.warn('Error in loadReferenceText:', error);
+      console.warn('Error loading reference text:', error);
       console.log('Using default reference text');
     } finally {
       this.isLoading = false;

@@ -15,11 +15,22 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
-    base: "./",
+    base: "/",
     publicDir: "public",
     server: {
       host: "::",
       port: 8080,
+    },
+    build: {
+      outDir: "dist",
+      assetsDir: "assets",
+      emptyOutDir: true,
+      copyPublicDir: true,
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, "index.html"),
+        },
+      },
     },
     plugins: [
       react(),
