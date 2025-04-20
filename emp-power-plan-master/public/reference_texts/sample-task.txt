@@ -1,0 +1,53 @@
+Software Development Task Guidelines
+
+1. Requirements Analysis
+- Understand and document user requirements
+- Identify system constraints and dependencies
+- Define acceptance criteria
+- Create user stories or use cases
+
+2. Design
+- Create system architecture
+- Design database schema
+- Plan API endpoints
+- Create UI/UX mockups
+
+3. Implementation
+- Write clean, maintainable code
+- Follow coding standards
+- Implement error handling
+- Add logging and monitoring
+- Write unit tests
+
+4. Testing
+- Perform unit testing
+- Conduct integration testing
+- Execute system testing
+- Perform user acceptance testing
+- Document test results
+
+5. Deployment
+- Prepare deployment documentation
+- Set up deployment environment
+- Configure CI/CD pipeline
+- Deploy to staging/production
+- Monitor system performance
+
+6. Maintenance
+- Monitor system health
+- Fix bugs and issues
+- Implement feature requests
+- Update documentation
+- Perform regular backups
+
+Best Practices:
+- Write clear, self-documenting code
+- Follow SOLID principles
+- Use version control effectively
+- Document important decisions
+- Maintain consistent coding style
+- Regular code reviews
+- Continuous integration
+- Automated testing
+- Security best practices
+- Performance optimization 
