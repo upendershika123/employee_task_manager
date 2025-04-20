@@ -32,20 +32,84 @@ export class ProgressService {
     
     try {
       this.isLoading = true;
-      const response = await fetch(import.meta.env.BASE_URL + 'reference_texts/sample-task.txt');
       
-      if (!response.ok) {
-        console.warn('Using default reference text - could not load sample task file:', response.status, response.statusText);
-        return;
+      // Try loading from the public directory using relative path
+      const publicPath = './reference_texts/sample-task.txt';
+      console.log('Attempting to load reference text from:', publicPath);
+      
+      try {
+        const response = await fetch(publicPath);
+        
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.trim()) {
+            this.referenceText = text;
+            console.log('Successfully loaded reference text from public path');
+            return;
+          }
+        }
+        
+        console.warn('Could not load from relative path, trying absolute path:', {
+          status: response.status,
+          statusText: response.statusText,
+          publicPath
+        });
+      } catch (fetchError) {
+        console.warn('Error loading from relative path:', fetchError);
       }
       
-      const text = await response.text();
-      if (text && text.trim()) {
-        this.referenceText = text;
-        console.log('Successfully loaded reference text');
+      // Try with absolute path
+      const absolutePath = '/reference_texts/sample-task.txt';
+      console.log('Attempting to load from absolute path:', absolutePath);
+      
+      try {
+        const absoluteResponse = await fetch(absolutePath);
+        
+        if (absoluteResponse.ok) {
+          const text = await absoluteResponse.text();
+          if (text && text.trim()) {
+            this.referenceText = text;
+            console.log('Successfully loaded reference text from absolute path');
+            return;
+          }
+        }
+        
+        console.warn('Could not load from absolute path:', {
+          status: absoluteResponse.status,
+          statusText: absoluteResponse.statusText,
+          absolutePath
+        });
+      } catch (fetchError) {
+        console.warn('Error loading from absolute path:', fetchError);
+      }
+      
+      // Try with BASE_URL as last resort
+      const baseUrlPath = `${import.meta.env.BASE_URL || '/'}reference_texts/sample-task.txt`;
+      console.log('Attempting to load from BASE_URL path:', baseUrlPath);
+      
+      try {
+        const baseUrlResponse = await fetch(baseUrlPath);
+        
+        if (baseUrlResponse.ok) {
+          const text = await baseUrlResponse.text();
+          if (text && text.trim()) {
+            this.referenceText = text;
+            console.log('Successfully loaded reference text from BASE_URL path');
+            return;
+          }
+        }
+        
+        console.warn('Failed to load reference text from all paths, using default:', {
+          status: baseUrlResponse.status,
+          statusText: baseUrlResponse.statusText,
+          baseUrlPath
+        });
+      } catch (fetchError) {
+        console.warn('Error loading from BASE_URL path:', fetchError);
       }
     } catch (error) {
-      console.warn('Using default reference text due to error:', error);
+      console.warn('Error in loadReferenceText:', error);
+      console.log('Using default reference text');
     } finally {
       this.isLoading = false;
     }
@@ -66,12 +130,19 @@ export class ProgressService {
     return Math.min(100, Math.max(0, Math.round(totalProgress)));
   }
 
+  private normalizeText(text: string): string {
+    return text.toLowerCase()
+      .replace(/[^\w\s]/g, '') // Remove punctuation
+      .replace(/\s+/g, ' ')    // Normalize whitespace
+      .trim();
+  }
+
   private calculateLengthProgress(text: string): number {
-    const words = text.split(/\s+/).filter(w => w.length > 0);
-    const minWords = 50;  // Minimum words for partial progress
-    const targetWords = 200;  // Target words for full progress
+    const minLength = 50;  // Minimum length for any progress
+    const maxLength = 500; // Length for maximum progress
     
-    return Math.min(100, (words.length / targetWords) * 100);
+    if (text.length < minLength) return 0;
+    return Math.min((text.length / maxLength) * 100, 100);
   }
 
   private calculateQualityProgress(userText: string, referenceText: string): number {
@@ -84,14 +155,6 @@ export class ProgressService {
     }
     
     return (matches / referenceWords.size) * 100;
-  }
-
-  private normalizeText(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[.,!?;:'"()\n\r]/g, ' ')  // Replace punctuation with spaces
-      .replace(/\s+/g, ' ')               // Normalize spaces
-      .trim();
   }
 
   public async saveProgress(progress: TaskProgress): Promise<void> {

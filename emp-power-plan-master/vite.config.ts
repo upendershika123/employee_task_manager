@@ -15,6 +15,8 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
+    base: "./",
+    publicDir: "public",
     server: {
       host: "::",
       port: 8080,
