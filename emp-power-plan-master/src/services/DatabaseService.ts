@@ -36,16 +36,27 @@ export class DatabaseServiceImpl implements DatabaseService {
 
   async saveTaskProgress(taskId: string, inputText: string, progress: number): Promise<void> {
     try {
+      // Test database connection first
+      const isConnected = await this.testConnection();
+      if (!isConnected) {
+        throw new Error('Database connection failed');
+      }
+
       // Check if entry exists
-      const { data: existing } = await this.supabase
+      const { data: existing, error: fetchError } = await this.supabase
         .from('task_input_history')
         .select('id')
         .eq('task_id', taskId)
         .single();
 
+      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+        console.error('Error fetching existing progress:', fetchError);
+        throw fetchError;
+      }
+
       if (existing) {
         // Update existing entry
-        const { error } = await this.supabase
+        const { error: updateError } = await this.supabase
           .from('task_input_history')
           .update({
             input_text: inputText,
@@ -54,10 +65,13 @@ export class DatabaseServiceImpl implements DatabaseService {
           })
           .eq('task_id', taskId);
 
-        if (error) throw error;
+        if (updateError) {
+          console.error('Error updating progress:', updateError);
+          throw updateError;
+        }
       } else {
         // Insert new entry
-        const { error } = await this.supabase
+        const { error: insertError } = await this.supabase
           .from('task_input_history')
           .insert({
             task_id: taskId,
@@ -66,11 +80,41 @@ export class DatabaseServiceImpl implements DatabaseService {
             created_at: new Date().toISOString()
           });
 
-        if (error) throw error;
+        if (insertError) {
+          console.error('Error inserting progress:', insertError);
+          throw insertError;
+        }
       }
     } catch (error) {
       console.error('Error saving task progress:', error);
+      // Add more detailed error information
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
       throw error;
+    }
+  }
+
+  async testConnection(): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase.from('task_input_history').select('count').limit(1);
+      
+      // Log connection details for debugging
+      console.log('Supabase Connection Test:', {
+        url: this.supabase.getUrl(),
+        isConnected: !error,
+        origin: window.location.origin,
+        error: error || 'None'
+      });
+
+      return !error;
+    } catch (err) {
+      console.error('Connection test failed:', err);
+      return false;
     }
   }
 } 
