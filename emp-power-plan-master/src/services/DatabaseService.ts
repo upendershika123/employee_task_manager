@@ -1,3 +1,13 @@
+import { SupabaseClient } from '@supabase/supabase-js';
+
+export interface TaskProgress {
+  taskId: string;
+  userId: string;
+  currentText: string;
+  lastUpdated: Date;
+  progressPercentage: number;
+}
+
 export interface DatabaseService {
   // ... existing methods ...
 
@@ -8,13 +18,32 @@ export interface DatabaseService {
 }
 
 export class DatabaseServiceImpl implements DatabaseService {
-  private supabase: any; // Replace with your actual Supabase client type
+  private supabase: SupabaseClient;
+  private isConnected: boolean = false;
 
-  constructor(supabase: any) {
+  constructor(supabase: SupabaseClient) {
     this.supabase = supabase;
+    this.initializeConnection();
+  }
+
+  private async initializeConnection() {
+    this.isConnected = await this.testConnection();
+    console.log('Database connection initialized:', {
+      isConnected: this.isConnected,
+      url: process.env.VITE_SUPABASE_URL || 'URL not available',
+      origin: typeof window !== 'undefined' ? window.location.origin : 'server'
+    });
   }
 
   async getTaskProgress(taskId: string): Promise<TaskProgress | null> {
+    if (!this.isConnected) {
+      console.warn('Database connection not established. Attempting to reconnect...');
+      await this.initializeConnection();
+      if (!this.isConnected) {
+        throw new Error('Failed to establish database connection');
+      }
+    }
+
     try {
       console.log('Fetching task progress for:', taskId);
       
@@ -30,7 +59,8 @@ export class DatabaseServiceImpl implements DatabaseService {
           taskId,
           errorCode: error.code,
           details: error.details,
-          hint: error.hint
+          hint: error.hint,
+          environment: process.env.NODE_ENV
         });
         throw error;
       }
@@ -47,20 +77,41 @@ export class DatabaseServiceImpl implements DatabaseService {
         progressPercentage: data.progress || 0
       };
     } catch (error) {
-      console.error('Error in getTaskProgress:', error);
+      console.error('Error in getTaskProgress:', {
+        error,
+        taskId,
+        environment: process.env.NODE_ENV,
+        connectionStatus: this.isConnected
+      });
       return null;
     }
   }
 
   async saveTaskProgress(taskId: string, inputText: string, progress: number): Promise<void> {
+    if (!this.isConnected) {
+      console.warn('Database connection not established. Attempting to reconnect...');
+      await this.initializeConnection();
+      if (!this.isConnected) {
+        throw new Error('Failed to establish database connection');
+      }
+    }
+
     try {
-      console.log('Saving task progress:', { taskId, progress });
+      console.log('Saving task progress:', { 
+        taskId, 
+        progress,
+        environment: process.env.NODE_ENV,
+        origin: typeof window !== 'undefined' ? window.location.origin : 'server'
+      });
       
       // Get current user
       const { data: { user }, error: userError } = await this.supabase.auth.getUser();
       
       if (userError || !user) {
-        console.error('User authentication error:', userError);
+        console.error('User authentication error:', {
+          error: userError,
+          environment: process.env.NODE_ENV
+        });
         throw new Error('User not authenticated');
       }
 
@@ -73,13 +124,14 @@ export class DatabaseServiceImpl implements DatabaseService {
         .eq('task_id', taskId)
         .single();
 
-      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+      if (fetchError && fetchError.code !== 'PGRST116') {
         console.error('Error fetching existing progress:', {
           error: fetchError,
           taskId,
           errorCode: fetchError.code,
           details: fetchError.details,
-          hint: fetchError.hint
+          hint: fetchError.hint,
+          environment: process.env.NODE_ENV
         });
         throw fetchError;
       }
@@ -103,7 +155,8 @@ export class DatabaseServiceImpl implements DatabaseService {
             taskId,
             errorCode: updateError.code,
             details: updateError.details,
-            hint: updateError.hint
+            hint: updateError.hint,
+            environment: process.env.NODE_ENV
           });
           throw updateError;
         }
@@ -127,7 +180,8 @@ export class DatabaseServiceImpl implements DatabaseService {
             taskId,
             errorCode: insertError.code,
             details: insertError.details,
-            hint: insertError.hint
+            hint: insertError.hint,
+            environment: process.env.NODE_ENV
           });
           throw insertError;
         }
@@ -139,7 +193,9 @@ export class DatabaseServiceImpl implements DatabaseService {
         error,
         taskId,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
+        stack: error instanceof Error ? error.stack : undefined,
+        environment: process.env.NODE_ENV,
+        connectionStatus: this.isConnected
       });
       throw error;
     }
@@ -152,16 +208,23 @@ export class DatabaseServiceImpl implements DatabaseService {
         .select('id')
         .limit(1);
       
+      const isConnected = !error;
+      
       console.log('Supabase Connection Test:', {
-        url: this.supabase.getUrl(),
-        isConnected: !error,
-        origin: window.location.origin,
+        url: process.env.VITE_SUPABASE_URL || 'URL not available',
+        isConnected,
+        origin: typeof window !== 'undefined' ? window.location.origin : 'server',
+        environment: process.env.NODE_ENV,
         error: error || 'None'
       });
 
-      return !error;
+      return isConnected;
     } catch (err) {
-      console.error('Connection test failed:', err);
+      console.error('Connection test failed:', {
+        error: err,
+        environment: process.env.NODE_ENV,
+        origin: typeof window !== 'undefined' ? window.location.origin : 'server'
+      });
       return false;
     }
   }
