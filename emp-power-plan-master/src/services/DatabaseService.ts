@@ -4,10 +4,15 @@ export interface DatabaseService {
   // Task Progress Methods
   getTaskProgress(taskId: string): Promise<TaskProgress | null>;
   saveTaskProgress(taskId: string, inputText: string, progress: number): Promise<void>;
+  testConnection(): Promise<boolean>;
 }
 
 export class DatabaseServiceImpl implements DatabaseService {
-  // ... existing methods ...
+  private supabase: any; // Replace with your actual Supabase client type
+
+  constructor(supabase: any) {
+    this.supabase = supabase;
+  }
 
   async getTaskProgress(taskId: string): Promise<TaskProgress | null> {
     try {
@@ -51,25 +56,22 @@ export class DatabaseServiceImpl implements DatabaseService {
     try {
       console.log('Saving task progress:', { taskId, progress });
       
-      // Test database connection first
-      const isConnected = await this.testConnection();
-      if (!isConnected) {
-        throw new Error('Database connection failed');
+      // Get current user
+      const { data: { user }, error: userError } = await this.supabase.auth.getUser();
+      
+      if (userError || !user) {
+        console.error('User authentication error:', userError);
+        throw new Error('User not authenticated');
       }
 
       const timestamp = new Date().toISOString();
-      const userId = this.supabase.auth.getUser().then(response => response.data.user?.id);
-
-      if (!userId) {
-        throw new Error('User not authenticated');
-      }
 
       // Check if entry exists
       const { data: existing, error: fetchError } = await this.supabase
         .from('task_input_history')
         .select('id')
         .eq('task_id', taskId)
-        .maybeSingle();
+        .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
         console.error('Error fetching existing progress:', {
@@ -82,8 +84,9 @@ export class DatabaseServiceImpl implements DatabaseService {
         throw fetchError;
       }
 
-      if (existing) {
+      if (existing?.id) {
         // Update existing entry
+        console.log('Updating existing progress entry:', existing.id);
         const { error: updateError } = await this.supabase
           .from('task_input_history')
           .update({
@@ -91,6 +94,7 @@ export class DatabaseServiceImpl implements DatabaseService {
             progress: progress,
             updated_at: timestamp
           })
+          .eq('id', existing.id)
           .eq('task_id', taskId);
 
         if (updateError) {
@@ -105,11 +109,12 @@ export class DatabaseServiceImpl implements DatabaseService {
         }
       } else {
         // Insert new entry
+        console.log('Creating new progress entry');
         const { error: insertError } = await this.supabase
           .from('task_input_history')
           .insert({
             task_id: taskId,
-            user_id: await userId,
+            user_id: user.id,
             input_text: inputText,
             progress: progress,
             created_at: timestamp,
@@ -142,9 +147,11 @@ export class DatabaseServiceImpl implements DatabaseService {
 
   async testConnection(): Promise<boolean> {
     try {
-      const { data, error } = await this.supabase.from('task_input_history').select('count').limit(1);
+      const { data, error } = await this.supabase
+        .from('task_input_history')
+        .select('id')
+        .limit(1);
       
-      // Log connection details for debugging
       console.log('Supabase Connection Test:', {
         url: this.supabase.getUrl(),
         isConnected: !error,
