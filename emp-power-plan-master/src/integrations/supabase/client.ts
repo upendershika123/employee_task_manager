@@ -29,6 +29,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
+// Debug flag to track client initialization
+let clientInitialized = false;
+
 // Common client options
 const clientOptions = {
   auth: {
@@ -46,7 +49,14 @@ const clientOptions = {
 };
 
 // Create two clients - one for regular operations and one for admin operations
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, clientOptions);
+export const supabase = (() => {
+  if (clientInitialized) {
+    console.warn('Attempting to initialize Supabase client multiple times');
+    return null;
+  }
+  clientInitialized = true;
+  return createClient<Database>(supabaseUrl, supabaseAnonKey, clientOptions);
+})();
 
 // Create a separate client with the service key for admin operations
 export const supabaseAdmin = supabaseServiceKey
@@ -59,5 +69,6 @@ console.log('Supabase Configuration:', {
   hasAnonKey: !!supabaseAnonKey,
   hasServiceKey: !!supabaseServiceKey,
   appUrl,
-  origin: window.location.origin
+  origin: window.location.origin,
+  clientInitialized
 });

@@ -32,10 +32,10 @@ export class ProgressService {
     
     try {
       this.isLoading = true;
-      const response = await fetch('/reference_texts/sample-task.txt');
+      const response = await fetch(import.meta.env.BASE_URL + 'reference_texts/sample-task.txt');
       
       if (!response.ok) {
-        console.warn('Using default reference text - could not load sample task file');
+        console.warn('Using default reference text - could not load sample task file:', response.status, response.statusText);
         return;
       }
       
