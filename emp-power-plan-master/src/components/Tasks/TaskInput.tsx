@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../Auth/AuthContext';
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
@@ -23,11 +23,16 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const databaseService = useDatabaseService();
+  const maxRetries = 3;
+  const retryDelay = 2000; // 2 seconds
+  const progressRef = useRef({ text: '', progress: 0 });
 
   // Load saved progress when component mounts
   useEffect(() => {
     let mounted = true;
+    let retryAttempt = 0;
 
     const loadSavedProgress = async () => {
       if (!user?.id || !taskId) return;
@@ -38,9 +43,16 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
         console.log('Loaded saved progress:', savedProgress);
         
         if (mounted && savedProgress) {
-          setInputText(savedProgress.currentText || '');
-          setProgress(savedProgress.progressPercentage || 0);
+          const savedText = savedProgress.currentText || '';
+          const savedProgress = savedProgress.progressPercentage || 0;
+          
+          setInputText(savedText);
+          setProgress(savedProgress);
           setLastSaved(savedProgress.lastUpdated);
+          
+          // Keep a reference for recovery
+          progressRef.current = { text: savedText, progress: savedProgress };
+          
           console.log('Updated state with saved progress');
         }
       } catch (error) {
@@ -48,6 +60,12 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
         if (mounted) {
           setError('Failed to load saved progress');
           toast.error('Failed to load saved progress');
+          
+          // Retry loading if we haven't exceeded max attempts
+          if (retryAttempt < maxRetries) {
+            retryAttempt++;
+            setTimeout(loadSavedProgress, retryDelay);
+          }
         }
       }
     };
@@ -55,6 +73,57 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
     loadSavedProgress();
     return () => { mounted = false; };
   }, [taskId, user?.id, databaseService]);
+
+  // Save progress with debounce and retry logic
+  const saveProgressDebounced = useCallback(
+    debounce(async (text: string, currentProgress: number) => {
+      if (!user?.id || !taskId) return;
+
+      const attemptSave = async (attempt: number = 0) => {
+        try {
+          setIsSaving(true);
+          console.log('Saving progress:', { 
+            taskId, 
+            text: text.substring(0, 50) + '...', 
+            progress: currentProgress,
+            attempt: attempt + 1 
+          });
+          
+          await databaseService.saveTaskProgress(taskId, text, currentProgress);
+          setLastSaved(new Date());
+          setError(null);
+          setRetryCount(0);
+          
+          // Update our reference after successful save
+          progressRef.current = { text, progress: currentProgress };
+
+          if (currentProgress === 100) {
+            toast.success('Task completed successfully!');
+          }
+        } catch (error) {
+          console.error('Error saving progress:', error);
+          
+          if (attempt < maxRetries) {
+            setRetryCount(attempt + 1);
+            // Exponential backoff
+            const delay = retryDelay * Math.pow(2, attempt);
+            setTimeout(() => attemptSave(attempt + 1), delay);
+          } else {
+            setError('Failed to save progress after multiple attempts');
+            toast.error('Failed to save progress');
+            // Revert to last known good state if save fails
+            setInputText(progressRef.current.text);
+            setProgress(progressRef.current.progress);
+          }
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      attemptSave();
+    }, 2000), // Increased debounce time for better network handling
+    [taskId, user?.id, databaseService]
+  );
 
   // Calculate progress based on text length and content
   const calculateProgress = useCallback((text: string): number => {
@@ -85,34 +154,7 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
     return Math.min(Math.round(lengthProgress), 100);
   }, []);
 
-  // Save progress with debounce
-  const saveProgressDebounced = useCallback(
-    debounce(async (text: string, currentProgress: number) => {
-      if (!user?.id || !taskId) return;
-
-      try {
-        setIsSaving(true);
-        console.log('Saving progress:', { taskId, text: text.substring(0, 50) + '...', progress: currentProgress });
-        
-        await databaseService.saveTaskProgress(taskId, text, currentProgress);
-        setLastSaved(new Date());
-        setError(null);
-
-        if (currentProgress === 100) {
-          toast.success('Task completed successfully!');
-        }
-      } catch (error) {
-        console.error('Error saving progress:', error);
-        setError('Failed to save progress');
-        toast.error('Failed to save progress');
-      } finally {
-        setIsSaving(false);
-      }
-    }, 1000),
-    [taskId, user?.id, databaseService]
-  );
-
-  // Handle input changes
+  // Handle input changes with optimistic updates
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setInputText(newText);
@@ -138,6 +180,9 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
             <div className="flex items-center gap-2 text-red-500 bg-red-50 p-2 rounded-md">
               <AlertCircle className="w-4 h-4" />
               <span className="text-sm">{error}</span>
+              {retryCount > 0 && (
+                <span className="text-sm">Retry attempt {retryCount}/{maxRetries}</span>
+              )}
             </div>
           )}
           <Textarea
@@ -158,7 +203,7 @@ const TaskInput: React.FC<TaskInputProps> = ({ taskId, taskTitle, taskDescriptio
               <p>Last saved: {lastSaved.toLocaleTimeString()}</p>
             )}
             {isSaving && (
-              <p>Saving...</p>
+              <p>Saving{retryCount > 0 ? ` (Retry ${retryCount}/${maxRetries})` : '...'}</p>
             )}
           </div>
         </div>
