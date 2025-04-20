@@ -14,8 +14,11 @@ export default defineConfig(async ({ mode }) => {
     componentTagger = taggerModule.componentTagger;
   }
 
+  // Get the base URL from environment variable or use default
+  const base = process.env.VITE_APP_URL ? new URL(process.env.VITE_APP_URL).pathname : '/';
+
   return {
-    base: "/",
+    base,
     publicDir: "public",
     server: {
       host: "::",
