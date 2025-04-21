@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useDatabaseService } from '@/services/DatabaseServiceContext';
 import { toast } from 'sonner';
+import { CircularProgress } from '@/components/ui/circular-progress';
+import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TaskListProps {
   tasks: Task[];
@@ -13,7 +16,39 @@ interface TaskListProps {
 
 const TaskList: React.FC<TaskListProps> = ({ tasks, onTaskClick }) => {
   const [assigneeNames, setAssigneeNames] = useState<Record<string, string>>({});
+  const [taskProgress, setTaskProgress] = useState<Record<string, number>>({});
   const databaseService = useDatabaseService();
+
+  // Load task progress when tasks change
+  useEffect(() => {
+    const loadTaskProgress = async () => {
+      for (const task of tasks) {
+        try {
+          const { data, error } = await supabase
+            .from('task_input_history')
+            .select('progress')
+            .eq('task_id', task.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+            console.error(`Error loading progress for task ${task.id}:`, error);
+            continue;
+          }
+
+          setTaskProgress(prev => ({
+            ...prev,
+            [task.id]: data?.progress || 0
+          }));
+        } catch (error) {
+          console.error(`Error loading progress for task ${task.id}:`, error);
+        }
+      }
+    };
+
+    loadTaskProgress();
+  }, [tasks]);
 
   // Load assignee names when tasks change
   React.useEffect(() => {
@@ -79,9 +114,20 @@ const TaskList: React.FC<TaskListProps> = ({ tasks, onTaskClick }) => {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span className="truncate">{task.title}</span>
-              <Badge className={getPriorityColor(task.priority)}>
-                {task.priority}
-              </Badge>
+              <div className="flex flex-col items-end gap-3">
+                <Badge className={getPriorityColor(task.priority)}>
+                  {task.priority}
+                </Badge>
+                <CircularProgress 
+                  value={taskProgress[task.id] || 0} 
+                  size="md"
+                  className={cn(
+                    task.status === 'completed' ? 'text-green-600' :
+                    task.status === 'in_progress' ? 'text-blue-600' :
+                    'text-gray-600'
+                  )}
+                />
+              </div>
             </CardTitle>
             <CardDescription>
               {task.description || 'No description provided'}
